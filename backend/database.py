@@ -91,6 +91,13 @@ def seed_initial_data():
             AgentDocument(**agent_data).save()
         print(f"[OK] Successfully seeded {len(initial_agents)} team members into MongoDB.")
 
+    # 1b. Migrate deprecated model names
+    deprecated_models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.0-pro']
+    for old_model in deprecated_models:
+        n = AgentDocument.objects(model=old_model).update(set__model='gemini-3.8-flash')
+        if n:
+            print(f"[MIGRATE] Updated {n} agent(s) from {old_model} → gemini-3.8-flash")
+
     # 2. Seed Initial Project State
     if ProjectStateDocument.objects.count() == 0:
         ProjectStateDocument(
