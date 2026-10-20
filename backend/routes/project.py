@@ -202,7 +202,7 @@ def parse_json_response(text):
     cleaned = cleaned.replace('```', '').strip()
     print(f"[DEBUG] parse_json_response CLEANED (repr, first 300): {repr(cleaned[:300])}")
     try:
-        result = json.loads(cleaned)
+        result = json.loads(cleaned, strict=False)
         print(f"[DEBUG] parse_json_response SUCCESS â€” type: {type(result).__name__}")
         return result
     except json.JSONDecodeError as e:
@@ -211,7 +211,7 @@ def parse_json_response(text):
         match = re.search(r'(\{.*\}|\[.*\])', cleaned, re.DOTALL)
         if match:
             try:
-                result = json.loads(match.group(1))
+                result = json.loads(match.group(1), strict=False)
                 print(f"[DEBUG] parse_json_response FALLBACK REGEX SUCCESS â€” type: {type(result).__name__}")
                 return result
             except json.JSONDecodeError as e2:
