@@ -1,4 +1,4 @@
-"""
+﻿"""
 DevSquad Mission Control Project & Disk Generation Route
 Executes true parallel execution between Michael (Frontend) and Dave (Backend).
 Defaults to Free Open-Source Models (Ollama + Llama 3, Mistral, Qwen, Gemma)
@@ -19,7 +19,7 @@ from models import ProjectStateDocument, AgentDocument, MessageDocument, Project
 
 load_dotenv()
 
-# Env-var fallback keys — used when the frontend doesn't send a key in the request body
+# Env-var fallback keys â€” used when the frontend doesn't send a key in the request body
 _ENV_GEMINI_KEY = os.getenv('GEMINI_API_KEY', '')
 _ENV_CLAUDE_KEY = os.getenv('CLAUDE_API_KEY', '')
 _ENV_OPENAI_KEY = os.getenv('OPENAI_API_KEY', '')
@@ -68,16 +68,33 @@ def call_ai_model(provider, api_key, model, prompt, system_prompt):
 
         # 2. Google Gemini
         elif provider == 'gemini' and api_key:
-            model_name = model or 'gemini-2.0-flash'
+            model_name = model or 'gemini-3.8-flash'
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
             payload = {
                 "contents": [{"parts": [{"text": f"System Directive: {system_prompt}\n\nTask: {prompt}"}]}],
                 "generationConfig": {"temperature": 0.4, "maxOutputTokens": 8192, "responseMimeType": "application/json"}
             }
+            print(f"\n{'='*60}")
+            print(f"[DEBUG] GEMINI REQUEST")
+            print(f"  URL   : {url[:80]}...")
+            print(f"  Model : {model_name}")
+            print(f"  Config: {payload['generationConfig']}")
+            print(f"  Prompt (first 200 chars): {prompt[:200]}")
+            print(f"{'='*60}\n")
             res = requests.post(url, json=payload, timeout=30)
+            print(f"\n{'='*60}")
+            print(f"[DEBUG] GEMINI RESPONSE")
+            print(f"  HTTP Status : {res.status_code}")
             if res.status_code == 200:
                 data = res.json()
-                return data['candidates'][0]['content']['parts'][0]['text']
+                raw_text = data['candidates'][0]['content']['parts'][0]['text']
+                print(f"  Raw text (first 500 chars):\n{raw_text[:500]}")
+                print(f"  Raw text repr (first 200): {repr(raw_text[:200])}")
+                print(f"{'='*60}\n")
+                return raw_text
+            else:
+                print(f"  Error body: {res.text[:300]}")
+                print(f"{'='*60}\n")
 
         # 3. Anthropic Claude
         elif provider == 'claude' and api_key:
@@ -123,7 +140,7 @@ def call_ai_model(provider, api_key, model, prompt, system_prompt):
     return None
 
 
-# ── System Prompts ────────────────────────────────────────────────────────────
+# â”€â”€ System Prompts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 ORCHESTRATOR_SYSTEM = """You are a Technical Lead. The user will give you an application idea. Your job is to split this into two separate technical requirements: one for the Frontend Developer and one for the Backend Developer.
 Return ONLY a valid JSON object in this exact format:
@@ -151,7 +168,7 @@ Return ONLY a valid JSON array of objects representing the files to be created. 
 ]
 Do not include any explanations, markdown wrapping, or conversational text. Output pure JSON."""
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def get_effective_keys(api_keys):
     """Merge request-body keys with env-var fallbacks."""
@@ -177,24 +194,34 @@ def resolve_provider(effective_keys, model):
 def parse_json_response(text):
     """Strip markdown fences then JSON-parse the AI response."""
     if not text:
+        print("[DEBUG] parse_json_response: received empty/None text")
         return None
+    print(f"\n[DEBUG] parse_json_response INPUT (repr, first 300): {repr(text[:300])}")
     # Aggressively strip all markdown fences
     cleaned = re.sub(r'```(?:json|JSON)?\s*', '', text)
     cleaned = cleaned.replace('```', '').strip()
+    print(f"[DEBUG] parse_json_response CLEANED (repr, first 300): {repr(cleaned[:300])}")
     try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
+        result = json.loads(cleaned)
+        print(f"[DEBUG] parse_json_response SUCCESS â€” type: {type(result).__name__}")
+        return result
+    except json.JSONDecodeError as e:
+        print(f"[DEBUG] parse_json_response json.loads FAILED: {e}")
         # Fallback: extract first JSON object or array from the text
         match = re.search(r'(\{.*\}|\[.*\])', cleaned, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
+                result = json.loads(match.group(1))
+                print(f"[DEBUG] parse_json_response FALLBACK REGEX SUCCESS â€” type: {type(result).__name__}")
+                return result
+            except json.JSONDecodeError as e2:
+                print(f"[DEBUG] parse_json_response FALLBACK also failed: {e2}")
                 return None
+        print("[DEBUG] parse_json_response: no JSON object/array found in text")
         return None
 
 
-# ── Orchestrator ──────────────────────────────────────────────────────────────
+# â”€â”€ Orchestrator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def call_orchestrator(user_prompt, provider, api_key, model):
     """
@@ -206,17 +233,17 @@ def call_orchestrator(user_prompt, provider, api_key, model):
     raw = call_ai_model(provider, api_key, model, user_prompt, ORCHESTRATOR_SYSTEM)
     result = parse_json_response(raw)
     if isinstance(result, dict) and 'frontend_task' in result and 'backend_task' in result:
-        print(f"[Orchestrator] Split OK — FE: {result['frontend_task'][:60]}...")
+        print(f"[Orchestrator] Split OK â€” FE: {result['frontend_task'][:60]}...")
         return result
     print(f"[Orchestrator] Parse failed, falling back to raw prompt for both agents.")
     return None
 
 
-# ── Agent Pods ────────────────────────────────────────────────────────────────
+# â”€â”€ Agent Pods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def generate_frontend_code(frontend_task, api_keys, model):
     """
-    Step 2a — Michael receives the orchestrator's frontend_task brief and returns
+    Step 2a â€” Michael receives the orchestrator's frontend_task brief and returns
     a JSON array of {filename, content} objects. Falls back to hardcoded templates
     if AI is unreachable or returns unparseable output.
     """
@@ -229,7 +256,7 @@ def generate_frontend_code(frontend_task, api_keys, model):
 
     # Use AI files if valid JSON array with filename+content entries
     if isinstance(ai_files, list) and ai_files and all('filename' in f and 'content' in f for f in ai_files):
-        print(f"[Michael] AI returned {len(ai_files)} file(s) — using AI output.")
+        print(f"[Michael] AI returned {len(ai_files)} file(s) â€” using AI output.")
         result = []
         for f in ai_files:
             fname = f['filename']
@@ -244,10 +271,10 @@ def generate_frontend_code(frontend_task, api_keys, model):
             })
         return result
 
-    print(f"[Michael] AI output not usable — falling back to template.")
+    print(f"[Michael] AI output not usable â€” falling back to template.")
     app_title = frontend_task.strip().capitalize()[:60] or "Modern Web Application"
 
-    # ── Template fallback ──
+    # â”€â”€ Template fallback â”€â”€
 
     html_code = f"""<!DOCTYPE html>
 <html lang="en">
@@ -280,11 +307,11 @@ def generate_frontend_code(frontend_task, api_keys, model):
   <nav class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
     <div class="flex items-center gap-3">
       <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 text-white font-bold text-lg">
-        ✦
+        âœ¦
       </div>
       <div>
         <h1 class="text-lg font-bold tracking-tight text-white">{app_title}</h1>
-        <p class="text-xs text-slate-400">Crafted in Parallel by Michael (Frontend) & Dave (Backend) • Free Open-Source Engine</p>
+        <p class="text-xs text-slate-400">Crafted in Parallel by Michael (Frontend) & Dave (Backend) â€¢ Free Open-Source Engine</p>
       </div>
     </div>
     <div class="flex items-center gap-3">
@@ -351,7 +378,7 @@ def generate_frontend_code(frontend_task, api_keys, model):
 
   <!-- Footer -->
   <footer class="mt-16 border-t border-slate-800/60 py-6 text-center text-xs text-slate-500">
-    <p>Powered by DevSquad • Generated on your PC</p>
+    <p>Powered by DevSquad â€¢ Generated on your PC</p>
   </footer>
 
   <script src="app.js"></script>
@@ -509,7 +536,7 @@ renderItems();
 
 def generate_backend_code(backend_task, api_keys, model):
     """
-    Step 2b — Dave receives the orchestrator's backend_task brief and returns
+    Step 2b â€” Dave receives the orchestrator's backend_task brief and returns
     a JSON array of {filename, content} objects. Falls back to hardcoded templates
     if AI is unreachable or returns unparseable output.
     """
@@ -522,7 +549,7 @@ def generate_backend_code(backend_task, api_keys, model):
 
     # Use AI files if valid JSON array with filename+content entries
     if isinstance(ai_files, list) and ai_files and all('filename' in f and 'content' in f for f in ai_files):
-        print(f"[Dave] AI returned {len(ai_files)} file(s) — using AI output.")
+        print(f"[Dave] AI returned {len(ai_files)} file(s) â€” using AI output.")
         result = []
         for f in ai_files:
             fname = f['filename']
@@ -537,7 +564,7 @@ def generate_backend_code(backend_task, api_keys, model):
             })
         return result
 
-    print(f"[Dave] AI output not usable — falling back to template.")
+    print(f"[Dave] AI output not usable â€” falling back to template.")
     backend_task_title = backend_task.strip().capitalize()[:60] or "Generated Application"
 
     backend_py = """\"\"\"
@@ -622,7 +649,7 @@ requests>=2.31.0
 
 ---
 
-## 🚀 Quick Start Instructions
+## ðŸš€ Quick Start Instructions
 
 ### 1. Run the Frontend
 Simply double-click or open `index.html` in your web browser (Chrome, Edge, Firefox, Brave).
@@ -640,13 +667,13 @@ The API server will run at `http://localhost:5001`.
 
 ---
 
-## 📁 File Structure
-- `index.html` — Frontend user interface (by Michael)
-- `styles.css` — Custom animations and styles (by Michael)
-- `app.js` — Client application logic & storage (by Michael)
-- `backend/app.py` — Python Flask REST API (by Dave)
-- `backend/requirements.txt` — Python dependencies (by Dave)
-- `README.md` — Project documentation
+## ðŸ“ File Structure
+- `index.html` â€” Frontend user interface (by Michael)
+- `styles.css` â€” Custom animations and styles (by Michael)
+- `app.js` â€” Client application logic & storage (by Michael)
+- `backend/app.py` â€” Python Flask REST API (by Dave)
+- `backend/requirements.txt` â€” Python dependencies (by Dave)
+- `README.md` â€” Project documentation
 """
 
     return [
@@ -694,10 +721,10 @@ def build_project_parallel():
         michael_agent = AgentDocument.objects(agent_id='michael').first()
         dave_agent = AgentDocument.objects(agent_id='dave').first()
 
-        michael_model = michael_agent.model if michael_agent else 'gemini-2.0-flash'
-        dave_model = dave_agent.model if dave_agent else 'gemini-2.0-flash'
+        michael_model = michael_agent.model if michael_agent else 'gemini-3.8-flash'
+        dave_model = dave_agent.model if dave_agent else 'gemini-3.8-flash'
 
-        # ── Step 1: Orchestrator splits the prompt ────────────────────────────
+        # â”€â”€ Step 1: Orchestrator splits the prompt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         effective_keys = get_effective_keys(api_keys)
         orch_provider, orch_key = resolve_provider(effective_keys, michael_model)
         split = call_orchestrator(prompt, orch_provider, orch_key, michael_model)
@@ -708,14 +735,14 @@ def build_project_parallel():
         # Update Agent status to coding in MongoDB
         AgentDocument.objects(agent_id='michael').update(
             set__status='coding',
-            set__status_text=f"Michael: Generating UI via {michael_model} — {frontend_task[:50]}..."
+            set__status_text=f"Michael: Generating UI via {michael_model} â€” {frontend_task[:50]}..."
         )
         AgentDocument.objects(agent_id='dave').update(
             set__status='coding',
-            set__status_text=f"Dave: Architecting API via {dave_model} — {backend_task[:50]}..."
+            set__status_text=f"Dave: Architecting API via {dave_model} â€” {backend_task[:50]}..."
         )
 
-        # ── Step 2: Run Michael & Dave in parallel ────────────────────────────
+        # â”€â”€ Step 2: Run Michael & Dave in parallel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         with ThreadPoolExecutor(max_workers=2) as executor:
             future_fe = executor.submit(generate_frontend_code, frontend_task, api_keys, michael_model)
             future_be = executor.submit(generate_backend_code,  backend_task,  api_keys, dave_model)
@@ -771,8 +798,8 @@ def build_project_parallel():
 
         # Save to Project History in MongoDB
         streams_data = {
-            'michael': f"[Orchestrator → Michael via {michael_model}]\nTask: {frontend_task}\n\n✔ Generated {len(frontend_files)} frontend file(s) and saved to disk.",
-            'dave': f"[Orchestrator → Dave via {dave_model}]\nTask: {backend_task}\n\n✔ Generated {len(backend_files)} backend file(s) and saved to disk."
+            'michael': f"[Orchestrator â†’ Michael via {michael_model}]\nTask: {frontend_task}\n\nâœ” Generated {len(frontend_files)} frontend file(s) and saved to disk.",
+            'dave': f"[Orchestrator â†’ Dave via {dave_model}]\nTask: {backend_task}\n\nâœ” Generated {len(backend_files)} backend file(s) and saved to disk."
         }
         try:
             ProjectHistoryDocument(
@@ -794,9 +821,9 @@ def build_project_parallel():
             sender_id='system',
             sender_name='Orbital Mission Control',
             sender_role='Coordinator',
-            sender_avatar='🛰️',
+            sender_avatar='ðŸ›°ï¸',
             channel_id='general',
-            text=f"🚀 **PARALLEL DISK SYNC COMPLETE**: {len(written_files)} files written to `{target_path}` by Michael & Dave using free open-source engine ({michael_model} & {dave_model})!",
+            text=f"ðŸš€ **PARALLEL DISK SYNC COMPLETE**: {len(written_files)} files written to `{target_path}` by Michael & Dave using free open-source engine ({michael_model} & {dave_model})!",
             timestamp=time.strftime("%I:%M %p")
         ).save()
 

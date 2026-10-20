@@ -1,4 +1,4 @@
-"""
+﻿"""
 DevSquad Database Initialization & Seeding with MongoEngine
 Connects to local MongoDB at mongodb://localhost:27017/devsquad and seeds
 the dedicated team: Michael (Frontend Specialist), Dave (Backend Specialist), and Sarah (QA/UX).
@@ -45,11 +45,11 @@ def seed_initial_data():
                 'name': 'Michael',
                 'role': 'Frontend Specialist',
                 'department': 'Frontend',
-                'avatar': '💻',
+                'avatar': 'ðŸ’»',
                 'color': 'from-cyan-500 to-blue-600',
                 'status': 'idle',
                 'status_text': 'Orbital Frontend Station online. Standing by for directives.',
-                'model': 'gemini-2.0-flash',
+                'model': 'gemini-3.8-flash',
                 'system_prompt': 'You are Michael, Senior Frontend Developer. You build responsive, modern, beautiful user interfaces using HTML5, CSS3, Tailwind CSS, JavaScript, and React.',
                 'skills': ['HTML5 & Modern CSS', 'Tailwind CSS', 'JavaScript (ESNext)', 'React Components', 'UI/UX & Responsive Design'],
                 'stats': {'tasksDone': 12, 'filesCreated': 18, 'reviewsDone': 10},
@@ -60,11 +60,11 @@ def seed_initial_data():
                 'name': 'Dave',
                 'role': 'Backend Specialist',
                 'department': 'Backend',
-                'avatar': '⚙️',
+                'avatar': 'âš™ï¸',
                 'color': 'from-emerald-500 to-teal-700',
                 'status': 'idle',
                 'status_text': 'Orbital Backend Station online. Database handlers synced.',
-                'model': 'gemini-2.0-flash',
+                'model': 'gemini-3.8-flash',
                 'system_prompt': 'You are Dave, Senior Backend Developer. You build robust REST APIs, Flask/Node.js servers, database schemas, and server-side logic.',
                 'skills': ['Python Flask', 'Node.js & Express', 'MongoDB & SQLite', 'REST API Architecture', 'Authentication & Endpoints'],
                 'stats': {'tasksDone': 14, 'filesCreated': 16, 'reviewsDone': 12},
@@ -75,11 +75,11 @@ def seed_initial_data():
                 'name': 'Sarah',
                 'role': 'QA & UI/UX Specialist',
                 'department': 'Design & QA',
-                'avatar': '🎨',
+                'avatar': 'ðŸŽ¨',
                 'color': 'from-purple-500 to-pink-600',
                 'status': 'idle',
                 'status_text': 'Quality control matrix primed.',
-                'model': 'gemini-2.0-flash',
+                'model': 'gemini-3.8-flash',
                 'system_prompt': 'You are Sarah, QA & Design Specialist. You verify UI styling, responsiveness, cross-browser compatibility, and API integrity.',
                 'skills': ['UI/UX Testing', 'Responsiveness QA', 'API Validation', 'Accessibility'],
                 'stats': {'tasksDone': 8, 'filesCreated': 6, 'reviewsDone': 15},

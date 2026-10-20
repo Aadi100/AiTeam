@@ -1,10 +1,10 @@
-'use client';
+﻿'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { Person, AIKeys, GeneratedFile, ProjectState, ParallelStreams, ProjectHistoryItem } from '@/types/office';
 import confetti from 'canvas-confetti';
 
-// Use the Next.js proxy by default (/api/py → http://127.0.0.1:5000/api).
+// Use the Next.js proxy by default (/api/py â†’ http://127.0.0.1:5000/api).
 // Set NEXT_PUBLIC_BACKEND_URL to a full origin (e.g. http://localhost:5000) to bypass the proxy.
 const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL
   ? `${process.env.NEXT_PUBLIC_BACKEND_URL.replace(/\/$/, '')}/api`
@@ -16,11 +16,11 @@ const DEFAULT_PEOPLE: Person[] = [
     name: 'Michael',
     role: 'Frontend Specialist',
     department: 'Frontend',
-    avatar: '💻',
+    avatar: 'ðŸ’»',
     color: 'from-cyan-500 to-blue-600',
     status: 'idle',
     statusText: 'Orbital Frontend Station online. Standing by for directives.',
-    model: 'gemini-2.0-flash',
+    model: 'gemini-3.8-flash',
     systemPrompt: 'You are Michael, Senior Frontend Developer. You build responsive, modern, beautiful user interfaces using HTML5, CSS3, Tailwind CSS, JavaScript, and React.',
     skills: ['HTML5 & Modern CSS', 'Tailwind CSS', 'JavaScript (ESNext)', 'React Components', 'UI/UX & Responsive Design'],
     stats: { tasksDone: 12, filesCreated: 18, reviewsDone: 10 },
@@ -31,11 +31,11 @@ const DEFAULT_PEOPLE: Person[] = [
     name: 'Dave',
     role: 'Backend Specialist',
     department: 'Backend',
-    avatar: '⚙️',
+    avatar: 'âš™ï¸',
     color: 'from-emerald-500 to-teal-700',
     status: 'idle',
     statusText: 'Orbital Backend Station online. Database handlers synced.',
-    model: 'gemini-2.0-flash',
+    model: 'gemini-3.8-flash',
     systemPrompt: 'You are Dave, Senior Backend Developer. You build robust REST APIs, Flask/Node.js servers, database schemas, and server-side logic.',
     skills: ['Python Flask', 'Node.js & Express', 'MongoDB & SQLite', 'REST API Architecture', 'Authentication & Endpoints'],
     stats: { tasksDone: 14, filesCreated: 16, reviewsDone: 12 },
@@ -46,11 +46,11 @@ const DEFAULT_PEOPLE: Person[] = [
     name: 'Sarah',
     role: 'QA & UI/UX Specialist',
     department: 'Design & QA',
-    avatar: '🎨',
+    avatar: 'ðŸŽ¨',
     color: 'from-purple-500 to-pink-600',
     status: 'idle',
     statusText: 'Quality control matrix primed.',
-    model: 'gemini-2.0-flash',
+    model: 'gemini-3.8-flash',
     systemPrompt: 'You are Sarah, QA & Design Specialist. You verify UI styling, responsiveness, cross-browser compatibility, and API integrity.',
     skills: ['UI/UX Testing', 'Responsiveness QA', 'API Validation', 'Accessibility'],
     stats: { tasksDone: 8, filesCreated: 6, reviewsDone: 15 },
@@ -543,8 +543,8 @@ export function OfficeProvider({ children }: { children: ReactNode }) {
           });
 
           setStreams({
-            michael: `[Michael - Frontend] Complete!\n✔ Created index.html (Responsive Tailwind UI)\n✔ Created styles.css (Animations & Glassmorphism)\n✔ Created app.js (Dynamic search, filter, local storage)\n✔ All files saved to: ${data.targetPath}`,
-            dave: `[Dave - Backend] Complete!\n✔ Created backend/app.py (Flask REST API)\n✔ Created backend/requirements.txt\n✔ Created README.md (Quick start guide)\n✔ Server ready on port 5001.`
+            michael: `[Michael - Frontend] Complete!\nâœ” Created index.html (Responsive Tailwind UI)\nâœ” Created styles.css (Animations & Glassmorphism)\nâœ” Created app.js (Dynamic search, filter, local storage)\nâœ” All files saved to: ${data.targetPath}`,
+            dave: `[Dave - Backend] Complete!\nâœ” Created backend/app.py (Flask REST API)\nâœ” Created backend/requirements.txt\nâœ” Created README.md (Quick start guide)\nâœ” Server ready on port 5001.`
           });
 
           // Refresh people stats & project history
