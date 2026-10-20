@@ -72,7 +72,7 @@ def call_ai_model(provider, api_key, model, prompt, system_prompt):
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
             payload = {
                 "contents": [{"parts": [{"text": f"System Directive: {system_prompt}\n\nTask: {prompt}"}]}],
-                "generationConfig": {"temperature": 0.4, "maxOutputTokens": 4096}
+                "generationConfig": {"temperature": 0.4, "maxOutputTokens": 8192, "responseMimeType": "application/json"}
             }
             res = requests.post(url, json=payload, timeout=30)
             if res.status_code == 200:
@@ -123,48 +123,131 @@ def call_ai_model(provider, api_key, model, prompt, system_prompt):
     return None
 
 
-def extract_code_block(text, lang_hint=''):
-    """Strip markdown fences from an AI response and return the raw code."""
-    if not text:
-        return None
-    # Try fenced block with optional language tag
-    match = re.search(rf'```(?:{lang_hint}[^\n]*)?\n(.*?)```', text, re.DOTALL | re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-    return text.strip()
+# ── System Prompts ────────────────────────────────────────────────────────────
 
+ORCHESTRATOR_SYSTEM = """You are a Technical Lead. The user will give you an application idea. Your job is to split this into two separate technical requirements: one for the Frontend Developer and one for the Backend Developer.
+Return ONLY a valid JSON object in this exact format:
+{
+  "frontend_task": "Detailed instructions for UI components, state management, and client-side logic.",
+  "backend_task": "Detailed instructions for the API, routes, data structure, and server logic."
+}
+Do not include markdown code blocks, greetings, or conversational text."""
 
-def generate_frontend_code(prompt, api_keys, model):
-    """
-    Michael generates the frontend UI (HTML, CSS, JS) in parallel.
-    Env-var keys (GEMINI_API_KEY etc.) are used as fallback when the frontend sends no key.
-    """
-    # Merge env-var fallbacks — request keys take precedence
-    effective_keys = {
-        'gemini': api_keys.get('gemini') or _ENV_GEMINI_KEY,
-        'claude': api_keys.get('claude') or _ENV_CLAUDE_KEY,
-        'openai': api_keys.get('openai') or _ENV_OPENAI_KEY,
+MICHAEL_SYSTEM = """You are Michael, an expert Frontend Developer. You will receive a task description. You must generate the complete frontend codebase.
+Return ONLY a valid JSON array of objects representing the files to be created. Use this exact schema:
+[
+  { "filename": "index.html", "content": "" },
+  { "filename": "styles.css", "content": "" },
+  { "filename": "app.js", "content": "" }
+]
+Do not include any explanations, markdown wrapping (like ```json), or conversational text. Output pure JSON."""
+
+DAVE_SYSTEM = """You are Dave, an expert Backend Developer. You will receive a task description. You must generate the complete backend codebase.
+Return ONLY a valid JSON array of objects representing the files to be created. Use this exact schema:
+[
+  { "filename": "app.py", "content": "" },
+  { "filename": "requirements.txt", "content": "" },
+  { "filename": "README.md", "content": "" }
+]
+Do not include any explanations, markdown wrapping, or conversational text. Output pure JSON."""
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def get_effective_keys(api_keys):
+    """Merge request-body keys with env-var fallbacks."""
+    return {
+        'gemini':    api_keys.get('gemini')    or _ENV_GEMINI_KEY,
+        'claude':    api_keys.get('claude')    or _ENV_CLAUDE_KEY,
+        'openai':    api_keys.get('openai')    or _ENV_OPENAI_KEY,
         'ollamaUrl': api_keys.get('ollamaUrl', 'http://localhost:11434'),
     }
 
-    has_paid_key = bool(effective_keys['gemini'] or effective_keys['claude'] or effective_keys['openai'])
 
-    if has_paid_key and not model.startswith('ollama'):
-        ai_key = effective_keys['gemini'] or effective_keys['claude'] or effective_keys['openai']
-        provider = 'gemini' if effective_keys['gemini'] else ('claude' if effective_keys['claude'] else 'openai')
-    else:
-        # Default to free open-source model: Ollama + Llama 3
-        provider = 'ollama'
-        ai_key = effective_keys['ollamaUrl']
-        if not model or not any(x in model.lower() for x in ['llama', 'mistral', 'qwen', 'gemma']):
-            model = 'ollama:llama3'
+def resolve_provider(effective_keys, model):
+    """Return (provider, api_key) based on available keys and chosen model."""
+    if not model.startswith('ollama') and (effective_keys['gemini'] or effective_keys['claude'] or effective_keys['openai']):
+        if effective_keys['gemini']:
+            return 'gemini', effective_keys['gemini']
+        if effective_keys['claude']:
+            return 'claude', effective_keys['claude']
+        return 'openai', effective_keys['openai']
+    return 'ollama', effective_keys['ollamaUrl']
 
-    sys_prompt = "You are Michael, Senior Frontend Developer. Return ONLY the complete HTML5 code for index.html with no explanation, no markdown, no code fences."
-    ai_response = call_ai_model(provider, ai_key, model, f"Generate a complete, modern, beautiful single-file HTML5 web application for: {prompt}. Use Tailwind CSS CDN. Return only the raw HTML starting with <!DOCTYPE html>.", sys_prompt)
-    ai_html = extract_code_block(ai_response, 'html')
 
-    # Clean, responsive web frontend tailored to user prompt
-    app_title = prompt.strip().capitalize() or "Modern Web Application"
+def parse_json_response(text):
+    """Strip markdown fences then JSON-parse the AI response."""
+    if not text:
+        return None
+    # Aggressively strip all markdown fences
+    cleaned = re.sub(r'```(?:json|JSON)?\s*', '', text)
+    cleaned = cleaned.replace('```', '').strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Fallback: extract first JSON object or array from the text
+        match = re.search(r'(\{.*\}|\[.*\])', cleaned, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                return None
+        return None
+
+
+# ── Orchestrator ──────────────────────────────────────────────────────────────
+
+def call_orchestrator(user_prompt, provider, api_key, model):
+    """
+    Step 1: Ask the Orchestrator to split the user's prompt into
+    a frontend_task and a backend_task.
+    Returns dict with keys 'frontend_task' and 'backend_task', or None on failure.
+    """
+    print(f"[Orchestrator] Splitting prompt via {provider}/{model}...")
+    raw = call_ai_model(provider, api_key, model, user_prompt, ORCHESTRATOR_SYSTEM)
+    result = parse_json_response(raw)
+    if isinstance(result, dict) and 'frontend_task' in result and 'backend_task' in result:
+        print(f"[Orchestrator] Split OK — FE: {result['frontend_task'][:60]}...")
+        return result
+    print(f"[Orchestrator] Parse failed, falling back to raw prompt for both agents.")
+    return None
+
+
+# ── Agent Pods ────────────────────────────────────────────────────────────────
+
+def generate_frontend_code(frontend_task, api_keys, model):
+    """
+    Step 2a — Michael receives the orchestrator's frontend_task brief and returns
+    a JSON array of {filename, content} objects. Falls back to hardcoded templates
+    if AI is unreachable or returns unparseable output.
+    """
+    effective_keys = get_effective_keys(api_keys)
+    provider, ai_key = resolve_provider(effective_keys, model)
+
+    print(f"[Michael] Generating frontend via {provider}/{model}...")
+    raw = call_ai_model(provider, ai_key, model, frontend_task, MICHAEL_SYSTEM)
+    ai_files = parse_json_response(raw)
+
+    # Use AI files if valid JSON array with filename+content entries
+    if isinstance(ai_files, list) and ai_files and all('filename' in f and 'content' in f for f in ai_files):
+        print(f"[Michael] AI returned {len(ai_files)} file(s) — using AI output.")
+        result = []
+        for f in ai_files:
+            fname = f['filename']
+            path = fname  # frontend files live at root
+            ext = fname.rsplit('.', 1)[-1] if '.' in fname else 'text'
+            lang_map = {'html': 'html', 'css': 'css', 'js': 'javascript', 'ts': 'typescript', 'jsx': 'jsx', 'tsx': 'tsx'}
+            result.append({
+                "path": path, "name": fname,
+                "content": f['content'],
+                "language": lang_map.get(ext, ext),
+                "author": "Michael (Frontend)"
+            })
+        return result
+
+    print(f"[Michael] AI output not usable — falling back to template.")
+    app_title = frontend_task.strip().capitalize()[:60] or "Modern Web Application"
+
+    # ── Template fallback ──
 
     html_code = f"""<!DOCTYPE html>
 <html lang="en">
@@ -417,44 +500,45 @@ if (items.length === 0) {
 renderItems();
 """
 
-    # Use AI-generated HTML if it looks valid, otherwise fall back to the template
-    final_html = ai_html if (ai_html and '<!DOCTYPE' in ai_html) else html_code
-
     return [
-        {"path": "index.html", "name": "index.html", "content": final_html, "language": "html", "author": "Michael (Frontend)"},
+        {"path": "index.html", "name": "index.html", "content": html_code, "language": "html", "author": "Michael (Frontend)"},
         {"path": "styles.css", "name": "styles.css", "content": css_code, "language": "css", "author": "Michael (Frontend)"},
         {"path": "app.js", "name": "app.js", "content": js_code, "language": "javascript", "author": "Michael (Frontend)"}
     ]
 
 
-def generate_backend_code(prompt, api_keys, model):
+def generate_backend_code(backend_task, api_keys, model):
     """
-    Dave generates the backend API (Flask/Node.js, models, README) in parallel.
-    Env-var keys (GEMINI_API_KEY etc.) are used as fallback when the frontend sends no key.
+    Step 2b — Dave receives the orchestrator's backend_task brief and returns
+    a JSON array of {filename, content} objects. Falls back to hardcoded templates
+    if AI is unreachable or returns unparseable output.
     """
-    # Merge env-var fallbacks — request keys take precedence
-    effective_keys = {
-        'gemini': api_keys.get('gemini') or _ENV_GEMINI_KEY,
-        'claude': api_keys.get('claude') or _ENV_CLAUDE_KEY,
-        'openai': api_keys.get('openai') or _ENV_OPENAI_KEY,
-        'ollamaUrl': api_keys.get('ollamaUrl', 'http://localhost:11434'),
-    }
+    effective_keys = get_effective_keys(api_keys)
+    provider, ai_key = resolve_provider(effective_keys, model)
 
-    has_paid_key = bool(effective_keys['gemini'] or effective_keys['claude'] or effective_keys['openai'])
+    print(f"[Dave] Generating backend via {provider}/{model}...")
+    raw = call_ai_model(provider, ai_key, model, backend_task, DAVE_SYSTEM)
+    ai_files = parse_json_response(raw)
 
-    if has_paid_key and not model.startswith('ollama'):
-        ai_key = effective_keys['claude'] or effective_keys['gemini'] or effective_keys['openai']
-        provider = 'claude' if effective_keys['claude'] else ('gemini' if effective_keys['gemini'] else 'openai')
-    else:
-        # Default to free open-source model: Ollama + Mistral
-        provider = 'ollama'
-        ai_key = effective_keys['ollamaUrl']
-        if not model or not any(x in model.lower() for x in ['llama', 'mistral', 'qwen', 'gemma']):
-            model = 'ollama:mistral'
+    # Use AI files if valid JSON array with filename+content entries
+    if isinstance(ai_files, list) and ai_files and all('filename' in f and 'content' in f for f in ai_files):
+        print(f"[Dave] AI returned {len(ai_files)} file(s) — using AI output.")
+        result = []
+        for f in ai_files:
+            fname = f['filename']
+            path = f"backend/{fname}" if not fname.startswith('backend/') and fname != 'README.md' else fname
+            ext = fname.rsplit('.', 1)[-1] if '.' in fname else 'text'
+            lang_map = {'py': 'python', 'txt': 'text', 'md': 'markdown', 'js': 'javascript', 'ts': 'typescript'}
+            result.append({
+                "path": path, "name": fname,
+                "content": f['content'],
+                "language": lang_map.get(ext, ext),
+                "author": "Dave (Backend)"
+            })
+        return result
 
-    sys_prompt = "You are Dave, Senior Backend Developer. Return ONLY the complete Python Flask app.py code with no explanation, no markdown, no code fences."
-    ai_response = call_ai_model(provider, ai_key, model, f"Generate a complete Python Flask REST API backend for: {prompt}. Include CORS, CRUD endpoints, and JSON persistence. Return only the raw Python code.", sys_prompt)
-    ai_python = extract_code_block(ai_response, 'python')
+    print(f"[Dave] AI output not usable — falling back to template.")
+    backend_task_title = backend_task.strip().capitalize()[:60] or "Generated Application"
 
     backend_py = """\"\"\"
 Python Flask REST Backend
@@ -530,7 +614,7 @@ flask-cors>=4.0.0
 requests>=2.31.0
 """
 
-    readme_md = f"""# {prompt.strip().capitalize() or "Generated Application"}
+    readme_md = f"""# {backend_task_title}
 
 > Generated by **DevSquad Mission Control**
 > **Michael** (Frontend Developer) & **Dave** (Backend Developer)
@@ -565,13 +649,10 @@ The API server will run at `http://localhost:5001`.
 - `README.md` — Project documentation
 """
 
-    # Use AI-generated Python if it looks valid, otherwise fall back to the template
-    final_py = ai_python if (ai_python and ('from flask' in ai_python or 'import flask' in ai_python.lower())) else backend_py
-
     return [
-        {"path": "backend/app.py", "name": "app.py", "content": final_py, "language": "python", "author": "Dave (Backend)"},
+        {"path": "backend/app.py", "name": "app.py", "content": backend_py, "language": "python", "author": "Dave (Backend)"},
         {"path": "backend/requirements.txt", "name": "requirements.txt", "content": req_txt, "language": "text", "author": "Dave (Backend)"},
-        {"path": "README.md", "name": "README.md", "content": readme_md, "language": "markdown", "author": "Michael & Dave"}
+        {"path": "README.md", "name": "README.md", "content": readme_md, "language": "markdown", "author": "Dave (Backend)"}
     ]
 
 
@@ -613,26 +694,34 @@ def build_project_parallel():
         michael_agent = AgentDocument.objects(agent_id='michael').first()
         dave_agent = AgentDocument.objects(agent_id='dave').first()
 
-        michael_model = michael_agent.model if michael_agent else 'ollama:llama3'
-        dave_model = dave_agent.model if dave_agent else 'ollama:mistral'
+        michael_model = michael_agent.model if michael_agent else 'gemini-2.0-flash'
+        dave_model = dave_agent.model if dave_agent else 'gemini-2.0-flash'
+
+        # ── Step 1: Orchestrator splits the prompt ────────────────────────────
+        effective_keys = get_effective_keys(api_keys)
+        orch_provider, orch_key = resolve_provider(effective_keys, michael_model)
+        split = call_orchestrator(prompt, orch_provider, orch_key, michael_model)
+
+        frontend_task = split['frontend_task'] if split else prompt
+        backend_task  = split['backend_task']  if split else prompt
 
         # Update Agent status to coding in MongoDB
         AgentDocument.objects(agent_id='michael').update(
             set__status='coding',
-            set__status_text=f"Michael: Generating UI via {michael_model} for '{prompt[:26]}...'"
+            set__status_text=f"Michael: Generating UI via {michael_model} — {frontend_task[:50]}..."
         )
         AgentDocument.objects(agent_id='dave').update(
             set__status='coding',
-            set__status_text=f"Dave: Architecting Flask routes via {dave_model} for '{prompt[:26]}...'"
+            set__status_text=f"Dave: Architecting API via {dave_model} — {backend_task[:50]}..."
         )
 
-        # Run Parallel Generation in ThreadPoolExecutor
+        # ── Step 2: Run Michael & Dave in parallel ────────────────────────────
         with ThreadPoolExecutor(max_workers=2) as executor:
-            future_fe = executor.submit(generate_frontend_code, prompt, api_keys, michael_model)
-            future_be = executor.submit(generate_backend_code, prompt, api_keys, dave_model)
+            future_fe = executor.submit(generate_frontend_code, frontend_task, api_keys, michael_model)
+            future_be = executor.submit(generate_backend_code,  backend_task,  api_keys, dave_model)
 
             frontend_files = future_fe.result()
-            backend_files = future_be.result()
+            backend_files  = future_be.result()
 
         all_files = frontend_files + backend_files
 
@@ -682,8 +771,8 @@ def build_project_parallel():
 
         # Save to Project History in MongoDB
         streams_data = {
-            'michael': f"[{michael_model} Free Open-Source] Generated responsive HTML5/Tailwind layout, app.js interactive state engine, and styles.css.",
-            'dave': f"[{dave_model} Free Open-Source] Architected Python Flask REST server (app.py) with CRUD routes, CORS, and README.md instructions."
+            'michael': f"[Orchestrator → Michael via {michael_model}]\nTask: {frontend_task}\n\n✔ Generated {len(frontend_files)} frontend file(s) and saved to disk.",
+            'dave': f"[Orchestrator → Dave via {dave_model}]\nTask: {backend_task}\n\n✔ Generated {len(backend_files)} backend file(s) and saved to disk."
         }
         try:
             ProjectHistoryDocument(
