@@ -74,27 +74,27 @@ def call_ai_model(provider, api_key, model, prompt, system_prompt):
                 "contents": [{"parts": [{"text": f"System Directive: {system_prompt}\n\nTask: {prompt}"}]}],
                 "generationConfig": {"temperature": 0.4, "maxOutputTokens": 8192, "responseMimeType": "application/json"}
             }
-            print(f"\n{'='*60}")
-            print(f"[DEBUG] GEMINI REQUEST")
-            print(f"  URL   : {url[:80]}...")
-            print(f"  Model : {model_name}")
-            print(f"  Config: {payload['generationConfig']}")
-            print(f"  Prompt (first 200 chars): {prompt[:200]}")
-            print(f"{'='*60}\n")
-            res = requests.post(url, json=payload, timeout=30)
-            print(f"\n{'='*60}")
-            print(f"[DEBUG] GEMINI RESPONSE")
-            print(f"  HTTP Status : {res.status_code}")
-            if res.status_code == 200:
-                data = res.json()
-                raw_text = data['candidates'][0]['content']['parts'][0]['text']
-                print(f"  Raw text (first 500 chars):\n{raw_text[:500]}")
-                print(f"  Raw text repr (first 200): {repr(raw_text[:200])}")
-                print(f"{'='*60}\n")
-                return raw_text
-            else:
-                print(f"  Error body: {res.text[:300]}")
-                print(f"{'='*60}\n")
+            print(f"[DEBUG] GEMINI → {model_name} | prompt: {prompt[:80]}...")
+            for attempt in range(3):
+                try:
+                    res = requests.post(url, json=payload, timeout=120)
+                    print(f"[DEBUG] GEMINI HTTP {res.status_code} (attempt {attempt+1})")
+                    if res.status_code == 200:
+                        data = res.json()
+                        raw_text = data['candidates'][0]['content']['parts'][0]['text']
+                        print(f"[DEBUG] GEMINI OK — {len(raw_text)} chars")
+                        return raw_text
+                    elif res.status_code == 503:
+                        wait = (attempt + 1) * 5
+                        print(f"[DEBUG] GEMINI 503 overloaded — retrying in {wait}s...")
+                        time.sleep(wait)
+                    else:
+                        print(f"[DEBUG] GEMINI error {res.status_code}: {res.text[:200]}")
+                        break
+                except requests.exceptions.Timeout:
+                    print(f"[DEBUG] GEMINI timeout on attempt {attempt+1} — retrying...")
+                    time.sleep(3)
+            return None
 
         # 3. Anthropic Claude
         elif provider == 'claude' and api_key:
@@ -110,7 +110,7 @@ def call_ai_model(provider, api_key, model, prompt, system_prompt):
                 "system": system_prompt,
                 "messages": [{"role": "user", "content": prompt}]
             }
-            res = requests.post(url, headers=headers, json=payload, timeout=35)
+            res = requests.post(url, headers=headers, json=payload, timeout=120)
             if res.status_code == 200:
                 data = res.json()
                 return data['content'][0]['text']
@@ -129,7 +129,7 @@ def call_ai_model(provider, api_key, model, prompt, system_prompt):
                     {"role": "user", "content": prompt}
                 ]
             }
-            res = requests.post(url, headers=headers, json=payload, timeout=35)
+            res = requests.post(url, headers=headers, json=payload, timeout=120)
             if res.status_code == 200:
                 data = res.json()
                 return data['choices'][0]['message']['content']
