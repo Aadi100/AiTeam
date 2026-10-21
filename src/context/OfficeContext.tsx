@@ -569,10 +569,14 @@ export function OfficeProvider({ children }: { children: ReactNode }) {
             startedAt: new Date().toLocaleTimeString()
           });
 
-          setStreams({
-            michael: `[Michael - Frontend] Complete!\nâœ” Created index.html (Responsive Tailwind UI)\nâœ” Created styles.css (Animations & Glassmorphism)\nâœ” Created app.js (Dynamic search, filter, local storage)\nâœ” All files saved to: ${data.targetPath}`,
-            dave: `[Dave - Backend] Complete!\nâœ” Created backend/app.py (Flask REST API)\nâœ” Created backend/requirements.txt\nâœ” Created README.md (Quick start guide)\nâœ” Server ready on port 5001.`
-          });
+          if (data.streams) {
+            setStreams(data.streams);
+          } else {
+            setStreams({
+              michael: `[Michael] Complete! ${data.files?.filter((f: {author: string}) => f.author?.includes('Michael')).length || 0} file(s) saved to ${data.targetPath}`,
+              dave: `[Dave] Complete! ${data.files?.filter((f: {author: string}) => f.author?.includes('Dave')).length || 0} file(s) saved to ${data.targetPath}`,
+            });
+          }
 
           // Refresh people stats & project history
           refreshFromBackend();

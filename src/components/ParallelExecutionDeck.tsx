@@ -16,6 +16,10 @@ import {
   Loader2,
   X,
   Monitor,
+  ChevronDown,
+  ChevronUp,
+  Cpu,
+  RefreshCw,
 } from 'lucide-react';
 
 const AGENT_THEME: Record<string, { border: string; headerText: string; iconBg: string; fileBorder: string; fileActiveBg: string; fileActiveText: string; genBadge: string }> = {
@@ -78,6 +82,145 @@ function filesBelongTo(files: GeneratedFile[], person: Person): GeneratedFile[] 
     if (person.id === 'dave' && (f.path.includes('backend') || f.path.endsWith('.py') || f.path.endsWith('.md') || f.path.endsWith('.txt') || f.path.endsWith('.json'))) return true;
     return false;
   });
+}
+
+type AgentTheme = typeof DEFAULT_THEME;
+
+interface AgentPodProps {
+  person: Person;
+  theme: AgentTheme;
+  agentFiles: GeneratedFile[];
+  stream: string;
+  isActive: boolean;
+  isExecuting: boolean;
+  planText: string;
+  termText: string;
+  selfCorrects: number;
+  selectedFile: GeneratedFile | null;
+  setSelectedFile: (f: GeneratedFile | null) => void;
+}
+
+function AgentPod({ person, theme, agentFiles, stream, isActive, isExecuting, planText, termText, selfCorrects, selectedFile, setSelectedFile }: AgentPodProps) {
+  const [planOpen, setPlanOpen]   = useState(false);
+  const [termOpen, setTermOpen]   = useState(false);
+
+  const hasAgentic = !!(planText || termText);
+
+  return (
+    <div className={`bg-slate-900/80 border ${theme.border} rounded-2xl p-4 shadow-xl backdrop-blur-md flex flex-col gap-3`}>
+      {/* Header */}
+      <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div className="flex items-center gap-2.5">
+          <div className={`w-8 h-8 rounded-lg border flex items-center justify-center text-sm ${theme.iconBg}`}>
+            {person.avatar || '🤖'}
+          </div>
+          <div>
+            <h3 className={`text-xs font-bold font-mono uppercase tracking-wider ${theme.headerText}`}>
+              {person.name} // {person.department || person.role.split(' ')[0].toUpperCase()} POD
+            </h3>
+            <p className="text-[11px] text-slate-400">{person.role}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {selfCorrects > 0 && (
+            <span className="flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950 border border-amber-700/60 text-amber-400">
+              <RefreshCw className="w-2.5 h-2.5" /> {selfCorrects}x fixed
+            </span>
+          )}
+          {hasAgentic && (
+            <span className="flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-indigo-950 border border-indigo-700/60 text-indigo-400">
+              <Cpu className="w-2.5 h-2.5" /> AGENTIC
+            </span>
+          )}
+          {isActive || (isExecuting && !stream) ? (
+            <span className={`flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded border animate-pulse ${theme.genBadge}`}>
+              <Loader2 className="w-3 h-3 animate-spin" /> WORKING
+            </span>
+          ) : (
+            <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+              {agentFiles.length} files
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Plan section */}
+      {planText && (
+        <div className="rounded-xl border border-indigo-800/40 bg-indigo-950/20 overflow-hidden">
+          <button
+            onClick={() => setPlanOpen(v => !v)}
+            className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-indigo-950/30 transition-colors cursor-pointer"
+          >
+            <span className="text-[11px] font-mono font-semibold text-indigo-400">📋 ARTIFACT PLAN</span>
+            {planOpen ? <ChevronUp className="w-3.5 h-3.5 text-indigo-500" /> : <ChevronDown className="w-3.5 h-3.5 text-indigo-500" />}
+          </button>
+          {planOpen && (
+            <div className="px-3 pb-3 text-[11px] text-slate-300 leading-relaxed whitespace-pre-wrap font-mono border-t border-indigo-800/30">
+              {planText}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Live stream / status */}
+      <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 font-mono text-xs text-slate-300 min-h-[72px] whitespace-pre-wrap leading-relaxed overflow-y-auto max-h-40">
+        {stream
+          ? stream.replace(/📋 PLAN:[\s\S]*?(📁|💻|$)/, '').trim() || stream.split('\n').slice(0, 3).join('\n')
+          : <span className="text-slate-600 italic">{person.name} standing by... waiting for directive.</span>
+        }
+      </div>
+
+      {/* Terminal output */}
+      {termText && (
+        <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/10 overflow-hidden">
+          <button
+            onClick={() => setTermOpen(v => !v)}
+            className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-emerald-950/20 transition-colors cursor-pointer"
+          >
+            <span className="text-[11px] font-mono font-semibold text-emerald-400 flex items-center gap-1.5">
+              <Terminal className="w-3 h-3" /> TERMINAL OUTPUT
+            </span>
+            {termOpen ? <ChevronUp className="w-3.5 h-3.5 text-emerald-500" /> : <ChevronDown className="w-3.5 h-3.5 text-emerald-500" />}
+          </button>
+          {termOpen && (
+            <pre className="px-3 pb-3 text-[10px] text-emerald-300 leading-relaxed overflow-x-auto border-t border-emerald-800/30 max-h-48">
+              {termText}
+            </pre>
+          )}
+        </div>
+      )}
+
+      {/* Files */}
+      {agentFiles.length > 0 && (
+        <div className="space-y-1.5">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500">Files by {person.name}:</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1.5">
+            {agentFiles.map((file, idx) => (
+              <button
+                key={idx}
+                onClick={() => setSelectedFile(file)}
+                className={`text-left p-2 rounded-lg border text-xs font-mono transition-all flex items-center justify-between cursor-pointer ${
+                  selectedFile?.path === file.path
+                    ? `${theme.fileActiveBg} ${theme.fileBorder} ${theme.fileActiveText} shadow-md`
+                    : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 truncate">
+                  {person.id === 'dave'
+                    ? <Terminal className={`w-3.5 h-3.5 shrink-0 ${theme.headerText}`} />
+                    : <FileCode className={`w-3.5 h-3.5 shrink-0 ${theme.headerText}`} />}
+                  <span className="truncate">{file.name}</span>
+                </div>
+                <span className="text-[10px] text-slate-500 ml-1 shrink-0">
+                  {Math.round((file.size / 1024) * 10) / 10}k
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function ParallelExecutionDeck() {
@@ -198,79 +341,29 @@ export default function ParallelExecutionDeck() {
           const stream = streams[person.id] || '';
           const isActive = person.status === 'coding';
 
+          // Parse structured sections from the agentic stream
+          const planMatch    = stream.match(/📋 PLAN:\n([\s\S]*?)(?=\n\n📁|$)/);
+          const termMatch    = stream.match(/💻 TERMINAL:\n([\s\S]*?)$/);
+          const iterMatch    = stream.match(/self-corrected (\d+)x/);
+          const planText     = planMatch?.[1]?.trim() || '';
+          const termText     = termMatch?.[1]?.trim() || '';
+          const selfCorrects = iterMatch ? parseInt(iterMatch[1]) : 0;
+
           return (
-            <div
+            <AgentPod
               key={person.id}
-              className={`bg-slate-900/80 border ${theme.border} rounded-2xl p-4 shadow-xl backdrop-blur-md flex flex-col`}
-            >
-              {/* Pod Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-8 h-8 rounded-lg border flex items-center justify-center text-sm ${theme.iconBg}`}>
-                    {person.avatar || '🤖'}
-                  </div>
-                  <div>
-                    <h3 className={`text-xs font-bold font-mono uppercase tracking-wider ${theme.headerText}`}>
-                      {person.name} // {person.department || person.role.split(' ')[0].toUpperCase()} POD
-                    </h3>
-                    <p className="text-[11px] text-slate-400">{person.role}</p>
-                  </div>
-                </div>
-
-                {isActive || (isExecuting && !stream) ? (
-                  <span className={`flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded border animate-pulse ${theme.genBadge}`}>
-                    <Loader2 className="w-3 h-3 animate-spin" /> WORKING
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
-                    {agentFiles.length} deliverables
-                  </span>
-                )}
-              </div>
-
-              {/* Live Stream Output */}
-              <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 mb-3 font-mono text-xs text-slate-300 min-h-[90px] whitespace-pre-wrap leading-relaxed overflow-x-auto flex-1">
-                {stream || (
-                  <span className="text-slate-600 italic">
-                    {person.name} standing by... waiting for directive.
-                  </span>
-                )}
-              </div>
-
-              {/* Files List */}
-              {agentFiles.length > 0 && (
-                <div className="space-y-1.5">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
-                    Files by {person.name}:
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1.5">
-                    {agentFiles.map((file, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => setSelectedFile(file)}
-                        className={`text-left p-2 rounded-lg border text-xs font-mono transition-all flex items-center justify-between cursor-pointer ${
-                          selectedFile?.path === file.path
-                            ? `${theme.fileActiveBg} ${theme.fileBorder} ${theme.fileActiveText} shadow-md`
-                            : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5 truncate">
-                          {person.id === 'dave' ? (
-                            <Terminal className={`w-3.5 h-3.5 shrink-0 ${theme.headerText}`} />
-                          ) : (
-                            <FileCode className={`w-3.5 h-3.5 shrink-0 ${theme.headerText}`} />
-                          )}
-                          <span className="truncate">{file.name}</span>
-                        </div>
-                        <span className="text-[10px] text-slate-500 ml-1 shrink-0">
-                          {Math.round((file.size / 1024) * 10) / 10}k
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+              person={person}
+              theme={theme}
+              agentFiles={agentFiles}
+              stream={stream}
+              isActive={isActive}
+              isExecuting={isExecuting}
+              planText={planText}
+              termText={termText}
+              selfCorrects={selfCorrects}
+              selectedFile={selectedFile}
+              setSelectedFile={setSelectedFile}
+            />
           );
         })}
       </div>
