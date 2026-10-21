@@ -2,18 +2,12 @@
 
 import React from 'react';
 import { useOffice } from '@/context/OfficeContext';
-import { ShieldCheck, Cpu, HardDrive, UserPlus, Settings, ExternalLink, Radio, Mic, MicOff, Volume2, VolumeX, History } from 'lucide-react';
+import { Cpu, UserPlus, Settings, Radio, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 
 export default function CockpitHeader() {
   const {
-    targetPath,
-    project,
-    openFolderInExplorer,
     setIsAISettingsOpen,
     setIsAddPersonOpen,
-    isHistoryOpen,
-    setIsHistoryOpen,
-    history,
     people,
     isVoiceActive,
     toggleVoiceListening,
@@ -45,10 +39,6 @@ export default function CockpitHeader() {
             </h1>
           </div>
           <p className="text-[11px] text-slate-400 flex items-center gap-2">
-            <span className="flex items-center gap-1 text-emerald-400">
-              <ShieldCheck className="w-3 h-3" /> MongoDB Connected
-            </span>
-            <span>•</span>
             <span className="text-slate-300 font-medium">{people.length} People in Office</span>
             <span>•</span>
             <span className="text-cyan-400 font-mono text-[10px] bg-cyan-950/60 px-1.5 py-0.2 rounded border border-cyan-800/40">
@@ -58,24 +48,6 @@ export default function CockpitHeader() {
         </div>
       </div>
 
-      {/* Target PC Disk Uplink Badge */}
-      <div className="hidden md:flex items-center gap-2 bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-xl text-xs">
-        <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
-        <span className="text-slate-400">Target PC:</span>
-        <span className="font-mono text-slate-200 max-w-[200px] xl:max-w-[280px] truncate" title={targetPath}>
-          {targetPath}
-        </span>
-        {project.status === 'completed' && (
-          <button
-            onClick={() => openFolderInExplorer()}
-            className="ml-1 text-cyan-400 hover:text-cyan-300 flex items-center gap-1 hover:underline text-[11px] cursor-pointer"
-            title="Open in Windows Explorer"
-          >
-            <span>Open</span>
-            <ExternalLink className="w-3 h-3" />
-          </button>
-        )}
-      </div>
 
       {/* Controls & Voice Triggers */}
       <div className="flex items-center gap-2.5">
@@ -104,19 +76,6 @@ export default function CockpitHeader() {
         >
           {isVoiceActive ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-cyan-400" />}
           <span className="hidden sm:inline">{isVoiceActive ? 'LISTENING' : 'VOICE'}</span>
-        </button>
-
-        {/* Mission Archive / History Button */}
-        <button
-          onClick={() => setIsHistoryOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700/70 text-slate-200 text-xs font-semibold shadow transition-all hover:border-slate-600 cursor-pointer"
-          title="View all previously generated projects and reuse them"
-        >
-          <History className="w-3.5 h-3.5 text-cyan-400" />
-          <span className="hidden sm:inline">History</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800">
-            {history.length}
-          </span>
         </button>
 
         {/* Add Person Button */}

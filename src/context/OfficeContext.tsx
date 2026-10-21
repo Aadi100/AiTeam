@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
-import { Person, AIKeys, GeneratedFile, ProjectState, ParallelStreams, ProjectHistoryItem } from '@/types/office';
+import { Person, AIKeys, GeneratedFile, ProjectState, ParallelStreams, ProjectHistoryItem, ChatMessage, ChatSession } from '@/types/office';
 import confetti from 'canvas-confetti';
 
 // Use the Next.js proxy by default (/api/py â†’ http://127.0.0.1:5000/api).
@@ -96,9 +96,31 @@ interface OfficeContextType {
   deleteHistoryItem: (id: string) => Promise<void>;
   clearAllHistory: () => Promise<void>;
   refreshFromBackend: () => Promise<void>;
+  // Chat
+  chatSessions: ChatSession[];
+  currentSessionId: string;
+  startNewChat: () => void;
+  switchSession: (id: string) => void;
+  deleteChatSession: (id: string) => void;
+  sendChatMessage: (text: string) => Promise<void>;
+  isAgentSpeaking: boolean;
 }
 
 const OfficeContext = createContext<OfficeContextType | undefined>(undefined);
+
+function makeSession(): ChatSession {
+  // Use crypto.randomUUID when available (no Date.now during render)
+  const id =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `chat-${Math.random().toString(36).slice(2, 10)}`;
+  return {
+    id,
+    title: 'New Chat',
+    createdAt: new Date().toISOString(),
+    messages: [],
+  };
+}
 
 export function OfficeProvider({ children }: { children: ReactNode }) {
   const [people, setPeople] = useState<Person[]>(DEFAULT_PEOPLE);
@@ -118,8 +140,8 @@ export function OfficeProvider({ children }: { children: ReactNode }) {
     totalFiles: 0
   });
   const [streams, setStreams] = useState<ParallelStreams>({
-    michael: 'Frontend engine standing by in orbit (Free Open-Source Ollama + Llama 3)...',
-    dave: 'Backend engine standing by in orbit (Free Open-Source Ollama + Mistral)...'
+    michael: '',
+    dave: ''
   });
   const [writtenFiles, setWrittenFiles] = useState<GeneratedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<GeneratedFile | null>(null);
@@ -132,6 +154,11 @@ export function OfficeProvider({ children }: { children: ReactNode }) {
   const [isAddPersonOpen, setIsAddPersonOpen] = useState<boolean>(false);
   const [history, setHistory] = useState<ProjectHistoryItem[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
+
+  // Chat state — start empty to avoid Date.now() during prerender, hydrate in useEffect
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string>('');
+  const [isAgentSpeaking, setIsAgentSpeaking] = useState<boolean>(false);
 
   const isExecutingRef = useRef<boolean>(false);
   const voiceTranscriptRef = useRef<string>('');
@@ -656,6 +683,218 @@ export function OfficeProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Hydrate chat sessions from localStorage (client-only, deferred from prerender)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('devsquad_chat_sessions');
+      if (saved) {
+        const sessions: ChatSession[] = JSON.parse(saved);
+        if (sessions.length > 0) {
+          setChatSessions(sessions);
+          setCurrentSessionId(sessions[0].id);
+          return;
+        }
+      }
+    } catch {/* */}
+    // No saved sessions — create a fresh one
+    const fresh = makeSession();
+    setChatSessions([fresh]);
+    setCurrentSessionId(fresh.id);
+  }, []);
+
+  // Persist chat sessions to localStorage (skip initial empty state)
+  useEffect(() => {
+    if (chatSessions.length === 0) return;
+    try {
+      localStorage.setItem('devsquad_chat_sessions', JSON.stringify(chatSessions));
+    } catch {/* */}
+  }, [chatSessions]);
+
+  const startNewChat = useCallback(() => {
+    const s = makeSession();
+    setChatSessions((prev) => [s, ...prev]);
+    setCurrentSessionId(s.id);
+  }, []);
+
+  const switchSession = useCallback((id: string) => {
+    setCurrentSessionId(id);
+  }, []);
+
+  const deleteChatSession = useCallback((id: string) => {
+    setChatSessions((prev) => {
+      const next = prev.filter((s) => s.id !== id);
+      if (next.length === 0) {
+        const fresh = makeSession();
+        setCurrentSessionId(fresh.id);
+        return [fresh];
+      }
+      setCurrentSessionId((cur) => (cur === id ? next[0].id : cur));
+      return next;
+    });
+  }, []);
+
+  const addChatMessage = useCallback((sessionId: string, msg: ChatMessage) => {
+    setChatSessions((prev) =>
+      prev.map((s) =>
+        s.id === sessionId
+          ? {
+              ...s,
+              title: s.messages.length === 0 && msg.role === 'user'
+                ? msg.content.slice(0, 38) + (msg.content.length > 38 ? '…' : '')
+                : s.title,
+              messages: [...s.messages, msg],
+            }
+          : s
+      )
+    );
+  }, []);
+
+  const sendChatMessage = useCallback(
+    async (text: string) => {
+      const sessionId = currentSessionId;
+      const isRexCommand = /^hey\s+rex\b/i.test(text.trim());
+
+      const userMsg: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        role: 'user',
+        content: text,
+        timestamp: new Date().toISOString(),
+        type: 'text',
+      };
+      addChatMessage(sessionId, userMsg);
+
+      if (isRexCommand) {
+        const rexPrompt = text.replace(/^hey\s+rex[,\s]*/i, '').trim();
+        const thinkingMsg: ChatMessage = {
+          id: `msg-${Date.now()}-t`,
+          role: 'agent',
+          agentId: 'rex',
+          agentName: 'Rex',
+          agentAvatar: '🖥️',
+          content: 'Planning PC action...',
+          timestamp: new Date().toISOString(),
+          type: 'thinking',
+        };
+        addChatMessage(sessionId, thinkingMsg);
+
+        try {
+          const res = await fetch('/api/py/rex/plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task: rexPrompt, prompt: rexPrompt, apiKeys: aiKeys }),
+          });
+          const data = await res.json();
+          const rexReply: ChatMessage = {
+            id: `msg-${Date.now()}-r`,
+            role: 'agent',
+            agentId: 'rex',
+            agentName: 'Rex',
+            agentAvatar: '🖥️',
+            content: data.success
+              ? (data.explanation || data.reply || JSON.stringify(data.plan, null, 2))
+              : `Error: ${data.error || 'Rex could not process that'}`,
+            timestamp: new Date().toISOString(),
+            type: data.success ? 'rex_plan' : 'error',
+            rexPlan: data.plan,
+          };
+          setChatSessions((prev) =>
+            prev.map((s) =>
+              s.id === sessionId
+                ? { ...s, messages: s.messages.filter((m) => m.id !== thinkingMsg.id).concat(rexReply) }
+                : s
+            )
+          );
+          if (data.success && data.explanation) {
+            setIsAgentSpeaking(true);
+            speakText(data.explanation);
+            setTimeout(() => setIsAgentSpeaking(false), 3000);
+          }
+        } catch (err) {
+          const errMsg: ChatMessage = {
+            id: `msg-${Date.now()}-e`,
+            role: 'agent',
+            agentId: 'rex',
+            agentName: 'Rex',
+            agentAvatar: '🖥️',
+            content: `Rex offline: ${err instanceof Error ? err.message : 'Unknown error'}`,
+            timestamp: new Date().toISOString(),
+            type: 'error',
+          };
+          setChatSessions((prev) =>
+            prev.map((s) =>
+              s.id === sessionId
+                ? { ...s, messages: s.messages.filter((m) => m.id !== thinkingMsg.id).concat(errMsg) }
+                : s
+            )
+          );
+        }
+      } else {
+        // General chat
+        const thinkingMsg: ChatMessage = {
+          id: `msg-${Date.now()}-t`,
+          role: 'agent',
+          agentId: 'squad',
+          agentName: 'DevSquad AI',
+          agentAvatar: '🤖',
+          content: 'Thinking...',
+          timestamp: new Date().toISOString(),
+          type: 'thinking',
+        };
+        addChatMessage(sessionId, thinkingMsg);
+
+        try {
+          const res = await fetch('/api/py/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text, sessionId, apiKeys: aiKeys }),
+          });
+          const data = await res.json();
+          const reply: ChatMessage = {
+            id: `msg-${Date.now()}-r`,
+            role: 'agent',
+            agentId: data.agentId || 'squad',
+            agentName: data.agentName || 'DevSquad AI',
+            agentAvatar: '🤖',
+            content: data.success ? data.reply : `Error: ${data.error || 'No response'}`,
+            timestamp: new Date().toISOString(),
+            type: data.success ? 'text' : 'error',
+          };
+          setChatSessions((prev) =>
+            prev.map((s) =>
+              s.id === sessionId
+                ? { ...s, messages: s.messages.filter((m) => m.id !== thinkingMsg.id).concat(reply) }
+                : s
+            )
+          );
+          if (data.success && data.reply) {
+            setIsAgentSpeaking(true);
+            speakText(data.reply.slice(0, 200));
+            setTimeout(() => setIsAgentSpeaking(false), 4000);
+          }
+        } catch (err) {
+          const errMsg: ChatMessage = {
+            id: `msg-${Date.now()}-e`,
+            role: 'agent',
+            agentId: 'squad',
+            agentName: 'DevSquad AI',
+            agentAvatar: '🤖',
+            content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}`,
+            timestamp: new Date().toISOString(),
+            type: 'error',
+          };
+          setChatSessions((prev) =>
+            prev.map((s) =>
+              s.id === sessionId
+                ? { ...s, messages: s.messages.filter((m) => m.id !== thinkingMsg.id).concat(errMsg) }
+                : s
+            )
+          );
+        }
+      }
+    },
+    [currentSessionId, aiKeys, addChatMessage, speakText]
+  );
+
   return (
     <OfficeContext.Provider
       value={{
@@ -695,7 +934,14 @@ export function OfficeProvider({ children }: { children: ReactNode }) {
         loadProjectFromHistory,
         deleteHistoryItem,
         clearAllHistory,
-        refreshFromBackend
+        refreshFromBackend,
+        chatSessions,
+        currentSessionId,
+        startNewChat,
+        switchSession,
+        deleteChatSession,
+        sendChatMessage,
+        isAgentSpeaking,
       }}
     >
       {children}

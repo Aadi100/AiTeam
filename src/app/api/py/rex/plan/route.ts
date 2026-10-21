@@ -14,8 +14,10 @@ export async function POST(req: NextRequest) {
       signal: controller.signal,
     });
     clearTimeout(timer);
-    const data = await res.json();
-    return NextResponse.json(data, { status: res.status });
+    const text = await res.text();
+    let data: unknown;
+    try { data = JSON.parse(text); } catch { data = { success: false, error: `Server error (${res.status})` }; }
+    return NextResponse.json(data, { status: res.ok ? res.status : (res.status || 500) });
   } catch (err: unknown) {
     clearTimeout(timer);
     const msg = err instanceof Error ? err.message : 'Unknown error';

@@ -1,10 +1,12 @@
 """
-Rex — Advanced PC Control Agent Tool Set
-Full Windows system control: files, apps, processes, system, shell, clipboard, network, etc.
+Rex — Advanced Cross-Platform Control Agent
+Works on Windows, macOS, Linux, and any Unix-like system.
+Three risk tiers: low (auto-execute), medium (permission preferred), high (always ask).
 """
 
 import os
 import re
+import sys
 import glob
 import shutil
 import socket
@@ -14,6 +16,12 @@ import webbrowser
 from pathlib import Path
 from datetime import datetime
 
+# ── Platform detection ────────────────────────────────────────────────────────
+IS_WINDOWS = sys.platform == 'win32'
+IS_MAC     = sys.platform == 'darwin'
+IS_LINUX   = sys.platform.startswith('linux')
+OS_NAME    = platform.system()   # 'Windows', 'Darwin', 'Linux'
+
 
 def _expand(path: str) -> str:
     return os.path.abspath(os.path.expanduser(str(path)))
@@ -21,6 +29,16 @@ def _expand(path: str) -> str:
 
 def _now() -> str:
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _desktop() -> str:
+    if IS_WINDOWS:
+        return os.path.join(os.path.expanduser('~'), 'Desktop')
+    if IS_MAC:
+        return os.path.join(os.path.expanduser('~'), 'Desktop')
+    # Linux: XDG
+    xdg = os.environ.get('XDG_DESKTOP_DIR', '')
+    return xdg if xdg else os.path.join(os.path.expanduser('~'), 'Desktop')
 
 
 # ── FILE SYSTEM ───────────────────────────────────────────────────────────────
@@ -229,29 +247,45 @@ def find_large_files(path: str, min_size_mb: float = 100) -> dict:
         return {'success': False, 'error': str(e)}
 
 
+def get_desktop_path() -> dict:
+    """Return the platform-appropriate Desktop path."""
+    p = _desktop()
+    return {'success': True, 'desktop': p, 'platform': OS_NAME, 'exists': os.path.exists(p)}
+
+
 # ── APPLICATION CONTROL ───────────────────────────────────────────────────────
 
 def open_application(app_name: str) -> dict:
-    """Launch an application by name (e.g. 'notepad', 'chrome', 'code')."""
+    """Launch an application by name. Works on Windows, macOS, Linux."""
     try:
-        subprocess.Popen(['start', '', app_name], shell=True)
-        return {'success': True, 'launched': app_name}
+        if IS_WINDOWS:
+            subprocess.Popen(['start', '', app_name], shell=True)
+        elif IS_MAC:
+            subprocess.Popen(['open', '-a', app_name])
+        else:
+            subprocess.Popen([app_name])
+        return {'success': True, 'launched': app_name, 'platform': OS_NAME}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
 
 def open_file_default(path: str) -> dict:
-    """Open a file with its default associated application."""
+    """Open a file with its default associated application (cross-platform)."""
     full = _expand(path)
     try:
-        os.startfile(full)
-        return {'success': True, 'opened': full}
+        if IS_WINDOWS:
+            os.startfile(full)
+        elif IS_MAC:
+            subprocess.Popen(['open', full])
+        else:
+            subprocess.Popen(['xdg-open', full])
+        return {'success': True, 'opened': full, 'platform': OS_NAME}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
 
 def open_in_browser(url: str) -> dict:
-    """Open a URL in the default web browser."""
+    """Open a URL in the default web browser (cross-platform)."""
     try:
         webbrowser.open(url)
         return {'success': True, 'url': url}
@@ -260,11 +294,16 @@ def open_in_browser(url: str) -> dict:
 
 
 def open_in_explorer(path: str) -> dict:
-    """Open a folder in Windows File Explorer."""
+    """Open a folder in the system file manager (Explorer/Finder/Nautilus)."""
     full = _expand(path)
     try:
-        subprocess.Popen(['explorer', full])
-        return {'success': True, 'path': full}
+        if IS_WINDOWS:
+            subprocess.Popen(['explorer', full])
+        elif IS_MAC:
+            subprocess.Popen(['open', full])
+        else:
+            subprocess.Popen(['xdg-open', full])
+        return {'success': True, 'path': full, 'platform': OS_NAME}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
@@ -272,8 +311,29 @@ def open_in_explorer(path: str) -> dict:
 def open_in_vscode(path: str) -> dict:
     """Open a file or folder in VS Code."""
     try:
-        subprocess.Popen(['code', _expand(path)], shell=True)
+        subprocess.Popen(['code', _expand(path)], shell=IS_WINDOWS)
         return {'success': True, 'path': _expand(path)}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def open_terminal(path: str = None) -> dict:
+    """Open a terminal window, optionally at a specific path (cross-platform)."""
+    cwd = _expand(path) if path else os.path.expanduser('~')
+    try:
+        if IS_WINDOWS:
+            subprocess.Popen(['cmd', '/K', f'cd /d "{cwd}"'], shell=True)
+        elif IS_MAC:
+            script = f'tell application "Terminal" to do script "cd {cwd}"'
+            subprocess.Popen(['osascript', '-e', script])
+        else:
+            for term in ['gnome-terminal', 'xterm', 'konsole', 'xfce4-terminal']:
+                try:
+                    subprocess.Popen([term, '--working-directory', cwd])
+                    return {'success': True, 'terminal': term, 'path': cwd}
+                except FileNotFoundError:
+                    continue
+        return {'success': True, 'path': cwd, 'platform': OS_NAME}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
@@ -281,37 +341,55 @@ def open_in_vscode(path: str) -> dict:
 # ── PROCESS MANAGEMENT ────────────────────────────────────────────────────────
 
 def list_processes(top_n: int = 20) -> dict:
-    """List running processes sorted by memory usage."""
+    """List running processes sorted by memory usage (cross-platform)."""
     try:
-        result = subprocess.run(
-            ['tasklist', '/FO', 'CSV', '/NH'],
-            capture_output=True, text=True, timeout=10, encoding='utf-8', errors='ignore'
-        )
-        procs = []
-        for line in result.stdout.strip().splitlines()[:top_n]:
-            parts = [p.strip('"') for p in line.split('","')]
-            if len(parts) >= 5:
-                procs.append({'name': parts[0], 'pid': parts[1], 'memory': parts[4]})
-        return {'success': True, 'count': len(procs), 'processes': procs}
+        if IS_WINDOWS:
+            result = subprocess.run(
+                ['tasklist', '/FO', 'CSV', '/NH'],
+                capture_output=True, text=True, timeout=10, encoding='utf-8', errors='ignore'
+            )
+            procs = []
+            for line in result.stdout.strip().splitlines()[:top_n]:
+                parts = [p.strip('"') for p in line.split('","')]
+                if len(parts) >= 5:
+                    procs.append({'name': parts[0], 'pid': parts[1], 'memory': parts[4]})
+        else:
+            result = subprocess.run(
+                ['ps', 'aux', '--sort=-%mem'] if IS_LINUX else ['ps', 'aux'],
+                capture_output=True, text=True, timeout=10
+            )
+            procs = []
+            for line in result.stdout.strip().splitlines()[1:top_n + 1]:
+                parts = line.split()
+                if len(parts) >= 11:
+                    procs.append({'user': parts[0], 'pid': parts[1], 'cpu%': parts[2], 'mem%': parts[3], 'name': ' '.join(parts[10:])[:60]})
+        return {'success': True, 'count': len(procs), 'processes': procs, 'platform': OS_NAME}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
 
 def kill_process(name_or_pid: str) -> dict:
-    """Kill a process by name (e.g. 'notepad.exe') or PID."""
+    """Kill a process by name or PID (cross-platform)."""
     try:
-        if str(name_or_pid).isdigit():
-            r = subprocess.run(['taskkill', '/PID', str(name_or_pid), '/F'], capture_output=True, text=True)
+        if IS_WINDOWS:
+            if str(name_or_pid).isdigit():
+                r = subprocess.run(['taskkill', '/PID', str(name_or_pid), '/F'], capture_output=True, text=True)
+            else:
+                r = subprocess.run(['taskkill', '/IM', name_or_pid, '/F'], capture_output=True, text=True)
+            success = r.returncode == 0
+            return {'success': success, 'target': name_or_pid, 'output': r.stdout.strip()}
         else:
-            r = subprocess.run(['taskkill', '/IM', name_or_pid, '/F'], capture_output=True, text=True)
-        success = r.returncode == 0
-        return {'success': success, 'target': name_or_pid, 'output': r.stdout.strip()}
+            if str(name_or_pid).isdigit():
+                r = subprocess.run(['kill', '-9', str(name_or_pid)], capture_output=True, text=True)
+            else:
+                r = subprocess.run(['pkill', '-9', '-f', name_or_pid], capture_output=True, text=True)
+            return {'success': r.returncode == 0, 'target': name_or_pid, 'output': r.stdout.strip()}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
 
 def start_process(command: str) -> dict:
-    """Start a new process/application by command."""
+    """Start a new process/application by command (cross-platform)."""
     try:
         proc = subprocess.Popen(command, shell=True)
         return {'success': True, 'command': command, 'pid': proc.pid}
@@ -322,58 +400,68 @@ def start_process(command: str) -> dict:
 # ── SYSTEM INFORMATION ────────────────────────────────────────────────────────
 
 def get_system_info() -> dict:
-    """Get CPU, RAM, disk, OS, and network information."""
+    """Get CPU, RAM, disk, OS, and system info (cross-platform)."""
     try:
+        # Disk info — cross-platform
         drives = []
-        for letter in 'CDEFGHIJKLMNOPQRSTUVWXYZ':
-            drive = f'{letter}:\\'
-            if os.path.exists(drive):
-                try:
-                    total, used, free = shutil.disk_usage(drive)
-                    drives.append({
-                        'drive': drive,
-                        'total_gb': round(total / 1e9, 1),
-                        'used_gb': round(used / 1e9, 1),
-                        'free_gb': round(free / 1e9, 1),
-                        'percent_used': round(used / total * 100, 1)
-                    })
-                except Exception:
-                    continue
+        if IS_WINDOWS:
+            for letter in 'CDEFGHIJKLMNOPQRSTUVWXYZ':
+                drive = f'{letter}:\\'
+                if os.path.exists(drive):
+                    try:
+                        total, used, free = shutil.disk_usage(drive)
+                        drives.append({'drive': drive, 'total_gb': round(total / 1e9, 1), 'used_gb': round(used / 1e9, 1), 'free_gb': round(free / 1e9, 1), 'percent_used': round(used / total * 100, 1)})
+                    except Exception:
+                        continue
+        else:
+            for mp in ['/', '/home', '/Users', '/tmp']:
+                if os.path.exists(mp):
+                    try:
+                        total, used, free = shutil.disk_usage(mp)
+                        drives.append({'mount': mp, 'total_gb': round(total / 1e9, 1), 'used_gb': round(used / 1e9, 1), 'free_gb': round(free / 1e9, 1), 'percent_used': round(used / total * 100, 1)})
+                    except Exception:
+                        continue
 
-        info = {
+        return {
             'success': True,
-            'os': platform.system(),
-            'os_version': platform.version(),
+            'platform': OS_NAME,
+            'platform_version': platform.version(),
             'architecture': platform.architecture()[0],
+            'machine': platform.machine(),
             'hostname': socket.gethostname(),
             'cpu_count': os.cpu_count(),
-            'username': os.getenv('USERNAME', 'unknown'),
+            'python_version': sys.version.split()[0],
+            'username': os.environ.get('USERNAME') or os.environ.get('USER', 'unknown'),
             'home': os.path.expanduser('~'),
-            'desktop': os.path.join(os.path.expanduser('~'), 'Desktop'),
-            'disk_drives': drives
+            'desktop': _desktop(),
+            'disk': drives
         }
-        return info
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
 
 def get_network_info() -> dict:
-    """Get network adapter info, IP addresses."""
+    """Get network info (cross-platform)."""
     try:
         hostname = socket.gethostname()
         local_ip = socket.gethostbyname(hostname)
-        result = subprocess.run(['ipconfig'], capture_output=True, text=True,
-                                encoding='utf-8', errors='ignore', timeout=10)
-        return {'success': True, 'hostname': hostname, 'local_ip': local_ip,
-                'adapters': result.stdout[:2000]}
+        if IS_WINDOWS:
+            cmd = ['ipconfig']
+        elif IS_MAC:
+            cmd = ['ifconfig']
+        else:
+            cmd = ['ip', 'addr']
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore', timeout=10)
+        return {'success': True, 'hostname': hostname, 'local_ip': local_ip, 'platform': OS_NAME, 'adapters': result.stdout[:2000]}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
 
 def ping_host(host: str) -> dict:
-    """Ping a host to check connectivity."""
+    """Ping a host to check connectivity (cross-platform)."""
     try:
-        r = subprocess.run(['ping', '-n', '3', host], capture_output=True, text=True,
+        count_flag = '-n' if IS_WINDOWS else '-c'
+        r = subprocess.run(['ping', count_flag, '3', host], capture_output=True, text=True,
                            encoding='utf-8', errors='ignore', timeout=15)
         return {'success': r.returncode == 0, 'host': host, 'output': r.stdout.strip()[-500:]}
     except Exception as e:
@@ -381,9 +469,9 @@ def ping_host(host: str) -> dict:
 
 
 def get_environment_vars() -> dict:
-    """List all environment variables."""
+    """List all environment variables (filtered for safety)."""
     env = dict(os.environ)
-    safe = {k: v for k, v in env.items() if not any(s in k.lower() for s in ['key', 'secret', 'token', 'password', 'pass'])}
+    safe = {k: v for k, v in env.items() if not any(s in k.lower() for s in ['key', 'secret', 'token', 'password', 'pass', 'credential'])}
     return {'success': True, 'count': len(safe), 'variables': safe}
 
 
@@ -393,10 +481,33 @@ def get_env_var(name: str) -> dict:
     return {'success': True, 'name': name, 'value': value, 'exists': value is not None}
 
 
+def get_battery_info() -> dict:
+    """Get battery/power status (cross-platform). Best on laptops/tablets."""
+    try:
+        if IS_WINDOWS:
+            r = subprocess.run(
+                ['powershell', '-command', '(Get-WmiObject Win32_Battery | Select-Object EstimatedChargeRemaining,BatteryStatus,FullChargeCapacity | ConvertTo-Json)'],
+                capture_output=True, text=True, timeout=10
+            )
+            return {'success': True, 'platform': 'Windows', 'raw': r.stdout.strip()[:500]}
+        elif IS_MAC:
+            r = subprocess.run(['pmset', '-g', 'batt'], capture_output=True, text=True, timeout=5)
+            return {'success': True, 'platform': 'macOS', 'raw': r.stdout.strip()}
+        else:
+            bat = Path('/sys/class/power_supply/BAT0')
+            if bat.exists():
+                cap = (bat / 'capacity').read_text().strip()
+                status = (bat / 'status').read_text().strip()
+                return {'success': True, 'platform': 'Linux', 'capacity_pct': cap, 'status': status}
+            return {'success': False, 'error': 'No battery detected'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
 # ── SHELL / COMMAND ───────────────────────────────────────────────────────────
 
 def run_command(command: str, working_dir: str = None, timeout: int = 30) -> dict:
-    """Run a shell/PowerShell command and return stdout/stderr."""
+    """Run a shell command and return stdout/stderr (cross-platform)."""
     try:
         cwd = _expand(working_dir) if working_dir else None
         r = subprocess.run(
@@ -409,7 +520,8 @@ def run_command(command: str, working_dir: str = None, timeout: int = 30) -> dic
             'returncode': r.returncode,
             'stdout': r.stdout[:4000],
             'stderr': r.stderr[:1000],
-            'command': command
+            'command': command,
+            'platform': OS_NAME
         }
     except subprocess.TimeoutExpired:
         return {'success': False, 'error': f'Command timed out after {timeout}s'}
@@ -418,19 +530,41 @@ def run_command(command: str, working_dir: str = None, timeout: int = 30) -> dic
 
 
 def run_python_script(script_path: str, args: str = '') -> dict:
-    """Run a Python script."""
-    return run_command(f'python "{_expand(script_path)}" {args}', timeout=60)
+    """Run a Python script (cross-platform)."""
+    py = 'python' if IS_WINDOWS else 'python3'
+    return run_command(f'{py} "{_expand(script_path)}" {args}', timeout=60)
 
 
 def run_powershell(script: str) -> dict:
-    """Run a PowerShell script block."""
+    """Run a PowerShell script block (Windows) or fallback to bash on Mac/Linux."""
     try:
-        r = subprocess.run(
-            ['powershell', '-NonInteractive', '-Command', script],
-            capture_output=True, text=True, timeout=30,
-            encoding='utf-8', errors='ignore'
-        )
+        if IS_WINDOWS:
+            r = subprocess.run(
+                ['powershell', '-NonInteractive', '-Command', script],
+                capture_output=True, text=True, timeout=30, encoding='utf-8', errors='ignore'
+            )
+        else:
+            # pwsh (PowerShell Core) available cross-platform
+            r = subprocess.run(
+                ['pwsh', '-NonInteractive', '-Command', script],
+                capture_output=True, text=True, timeout=30, encoding='utf-8', errors='ignore'
+            )
         return {'success': r.returncode == 0, 'stdout': r.stdout[:3000], 'stderr': r.stderr[:500]}
+    except FileNotFoundError:
+        return {'success': False, 'error': 'PowerShell not found. Use run_bash() on this platform.'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def run_bash(script: str, timeout: int = 30) -> dict:
+    """Run a bash/sh script (macOS and Linux; uses sh on Windows)."""
+    shell = 'bash' if not IS_WINDOWS else 'sh'
+    try:
+        r = subprocess.run([shell, '-c', script], capture_output=True, text=True,
+                           timeout=timeout, encoding='utf-8', errors='ignore')
+        return {'success': r.returncode == 0, 'stdout': r.stdout[:3000], 'stderr': r.stderr[:500], 'shell': shell}
+    except FileNotFoundError:
+        return run_command(script, timeout=timeout)
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
@@ -438,25 +572,47 @@ def run_powershell(script: str) -> dict:
 # ── CLIPBOARD ─────────────────────────────────────────────────────────────────
 
 def get_clipboard() -> dict:
-    """Read current clipboard contents."""
+    """Read current clipboard contents (cross-platform)."""
     try:
-        r = subprocess.run(
-            ['powershell', '-command', 'Get-Clipboard'],
-            capture_output=True, text=True, timeout=5, encoding='utf-8', errors='ignore'
-        )
-        return {'success': True, 'content': r.stdout.strip()}
+        if IS_WINDOWS:
+            r = subprocess.run(['powershell', '-command', 'Get-Clipboard'],
+                               capture_output=True, text=True, timeout=5, encoding='utf-8', errors='ignore')
+            return {'success': True, 'content': r.stdout.strip()}
+        elif IS_MAC:
+            r = subprocess.run(['pbpaste'], capture_output=True, text=True, timeout=5)
+            return {'success': True, 'content': r.stdout}
+        else:
+            for cmd in [['xclip', '-selection', 'clipboard', '-o'], ['xsel', '--clipboard', '--output']]:
+                try:
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                    return {'success': True, 'content': r.stdout}
+                except FileNotFoundError:
+                    continue
+            return {'success': False, 'error': 'Install xclip or xsel for clipboard support on Linux'}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
 
 def set_clipboard(text: str) -> dict:
-    """Write text to clipboard."""
+    """Write text to clipboard (cross-platform)."""
     try:
-        r = subprocess.run(
-            ['powershell', '-command', f'Set-Clipboard -Value @\'\n{text}\n\'@'],
-            capture_output=True, text=True, timeout=5
-        )
-        return {'success': r.returncode == 0, 'set_length': len(text)}
+        if IS_WINDOWS:
+            r = subprocess.run(
+                ['powershell', '-command', f'Set-Clipboard -Value @\'\n{text}\n\'@'],
+                capture_output=True, text=True, timeout=5
+            )
+            return {'success': r.returncode == 0, 'set_length': len(text)}
+        elif IS_MAC:
+            r = subprocess.run(['pbcopy'], input=text.encode(), timeout=5)
+            return {'success': r.returncode == 0, 'set_length': len(text)}
+        else:
+            for cmd in [['xclip', '-selection', 'clipboard'], ['xsel', '--clipboard', '--input']]:
+                try:
+                    r = subprocess.run(cmd, input=text.encode(), timeout=5)
+                    return {'success': r.returncode == 0, 'set_length': len(text)}
+                except FileNotFoundError:
+                    continue
+            return {'success': False, 'error': 'Install xclip or xsel for clipboard support on Linux'}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
@@ -464,12 +620,14 @@ def set_clipboard(text: str) -> dict:
 # ── SCREENSHOT ────────────────────────────────────────────────────────────────
 
 def take_screenshot(save_path: str = None) -> dict:
-    """Take a screenshot of the primary screen."""
+    """Take a screenshot of the primary screen (cross-platform)."""
+    ts = int(datetime.now().timestamp())
     if not save_path:
-        save_path = os.path.join(os.path.expanduser('~'), 'Desktop',
-                                 f'rex_screenshot_{int(datetime.now().timestamp())}.png')
+        save_path = os.path.join(_desktop(), f'rex_screenshot_{ts}.png')
     full = _expand(save_path)
-    script = f'''
+    try:
+        if IS_WINDOWS:
+            script = f'''
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 $s = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $bmp = New-Object System.Drawing.Bitmap $s.Width,$s.Height
@@ -478,20 +636,31 @@ $g.CopyFromScreen($s.Location,[System.Drawing.Point]::Empty,$s.Size)
 $bmp.Save('{full}')
 $g.Dispose(); $bmp.Dispose()
 '''
-    try:
-        r = subprocess.run(['powershell', '-command', script], capture_output=True, timeout=15)
+            subprocess.run(['powershell', '-command', script], capture_output=True, timeout=15)
+        elif IS_MAC:
+            subprocess.run(['screencapture', '-x', full], timeout=10)
+        else:
+            for tool in [['scrot', full], ['import', '-window', 'root', full], ['gnome-screenshot', '-f', full]]:
+                try:
+                    subprocess.run(tool, timeout=10)
+                    break
+                except FileNotFoundError:
+                    continue
+
         if os.path.exists(full):
-            return {'success': True, 'saved_to': full}
-        return {'success': False, 'error': 'Screenshot file not created'}
+            return {'success': True, 'saved_to': full, 'platform': OS_NAME}
+        return {'success': False, 'error': 'Screenshot file not created. Install scrot (Linux) or use Windows/Mac.'}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
 
-# ── WINDOWS NOTIFICATION ──────────────────────────────────────────────────────
+# ── NOTIFICATION ──────────────────────────────────────────────────────────────
 
 def show_notification(title: str, message: str, duration_ms: int = 4000) -> dict:
-    """Show a Windows toast/balloon notification."""
-    script = f'''
+    """Show a system notification (cross-platform: Windows/macOS/Linux)."""
+    try:
+        if IS_WINDOWS:
+            script = f'''
 Add-Type -AssemblyName System.Windows.Forms
 $n = New-Object System.Windows.Forms.NotifyIcon
 $n.Icon = [System.Drawing.SystemIcons]::Information
@@ -500,9 +669,13 @@ $n.ShowBalloonTip({duration_ms}, "{title}", "{message}", [System.Windows.Forms.T
 Start-Sleep -Milliseconds {duration_ms + 500}
 $n.Dispose()
 '''
-    try:
-        subprocess.Popen(['powershell', '-command', script])
-        return {'success': True, 'title': title, 'message': message}
+            subprocess.Popen(['powershell', '-command', script])
+        elif IS_MAC:
+            script = f'display notification "{message}" with title "{title}"'
+            subprocess.Popen(['osascript', '-e', script])
+        else:
+            subprocess.Popen(['notify-send', title, message, '-t', str(duration_ms)])
+        return {'success': True, 'title': title, 'message': message, 'platform': OS_NAME}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
@@ -524,17 +697,30 @@ def git_diff(repo_path: str = '.') -> dict:
     return run_command('git diff --stat', working_dir=repo_path, timeout=10)
 
 
+def git_clone(url: str, dest: str = None) -> dict:
+    """Clone a git repository."""
+    cmd = f'git clone {url}' + (f' "{_expand(dest)}"' if dest else '')
+    return run_command(cmd, timeout=120)
+
+
+def git_pull(repo_path: str = '.') -> dict:
+    """Pull latest changes in a repository."""
+    return run_command('git pull', working_dir=repo_path, timeout=60)
+
+
 # ── TOOL REGISTRY ─────────────────────────────────────────────────────────────
 
 TOOLS = {
-    # READ-ONLY / LOW RISK — no permission needed
+    # READ-ONLY / LOW RISK
     'search_files':        {'fn': search_files,        'risk': 'low',    'desc': 'Search files by name or content'},
     'list_directory':      {'fn': list_directory,      'risk': 'low',    'desc': 'List directory contents'},
-    'read_file':           {'fn': read_file,           'risk': 'low',    'desc': 'Read a file\'s contents'},
+    'read_file':           {'fn': read_file,           'risk': 'low',    'desc': 'Read a file contents'},
     'get_file_info':       {'fn': get_file_info,       'risk': 'low',    'desc': 'Get file metadata'},
     'find_large_files':    {'fn': find_large_files,    'risk': 'low',    'desc': 'Find files larger than N MB'},
+    'get_desktop_path':    {'fn': get_desktop_path,    'risk': 'low',    'desc': 'Get Desktop folder path'},
     'get_system_info':     {'fn': get_system_info,     'risk': 'low',    'desc': 'Get CPU, RAM, disk, OS info'},
     'get_network_info':    {'fn': get_network_info,    'risk': 'low',    'desc': 'Get network and IP info'},
+    'get_battery_info':    {'fn': get_battery_info,    'risk': 'low',    'desc': 'Get battery/power status'},
     'ping_host':           {'fn': ping_host,           'risk': 'low',    'desc': 'Ping a host to check connectivity'},
     'list_processes':      {'fn': list_processes,      'risk': 'low',    'desc': 'List running processes'},
     'get_clipboard':       {'fn': get_clipboard,       'risk': 'low',    'desc': 'Read clipboard contents'},
@@ -543,8 +729,9 @@ TOOLS = {
     'git_status':          {'fn': git_status,          'risk': 'low',    'desc': 'Git status of a repo'},
     'git_log':             {'fn': git_log,             'risk': 'low',    'desc': 'Recent git commits'},
     'git_diff':            {'fn': git_diff,            'risk': 'low',    'desc': 'Git diff of uncommitted changes'},
+    'take_screenshot':     {'fn': take_screenshot,     'risk': 'low',    'desc': 'Take a screenshot'},
 
-    # WRITE / MEDIUM RISK — permission required
+    # WRITE / MEDIUM RISK
     'write_file':          {'fn': write_file,          'risk': 'medium', 'desc': 'Write or create a file'},
     'create_folder':       {'fn': create_folder,       'risk': 'medium', 'desc': 'Create a directory'},
     'copy_item':           {'fn': copy_item,           'risk': 'medium', 'desc': 'Copy a file or folder'},
@@ -553,20 +740,23 @@ TOOLS = {
     'set_clipboard':       {'fn': set_clipboard,       'risk': 'medium', 'desc': 'Set clipboard text'},
     'open_in_browser':     {'fn': open_in_browser,     'risk': 'medium', 'desc': 'Open URL in browser'},
     'open_file_default':   {'fn': open_file_default,   'risk': 'medium', 'desc': 'Open file with default app'},
-    'open_in_explorer':    {'fn': open_in_explorer,    'risk': 'medium', 'desc': 'Open folder in Explorer'},
+    'open_in_explorer':    {'fn': open_in_explorer,    'risk': 'medium', 'desc': 'Open folder in file manager'},
     'open_in_vscode':      {'fn': open_in_vscode,      'risk': 'medium', 'desc': 'Open in VS Code'},
     'open_application':    {'fn': open_application,    'risk': 'medium', 'desc': 'Launch an application'},
-    'show_notification':   {'fn': show_notification,   'risk': 'low',    'desc': 'Show Windows notification'},
-    'take_screenshot':     {'fn': take_screenshot,     'risk': 'low',    'desc': 'Take a screenshot'},
+    'open_terminal':       {'fn': open_terminal,       'risk': 'medium', 'desc': 'Open a terminal window'},
+    'show_notification':   {'fn': show_notification,   'risk': 'low',    'desc': 'Show system notification'},
     'start_process':       {'fn': start_process,       'risk': 'medium', 'desc': 'Start a new process'},
+    'git_pull':            {'fn': git_pull,            'risk': 'medium', 'desc': 'Git pull latest changes'},
+    'git_clone':           {'fn': git_clone,           'risk': 'medium', 'desc': 'Clone a git repository'},
 
-    # DESTRUCTIVE / HIGH RISK — always require permission
+    # DESTRUCTIVE / HIGH RISK
     'rename_item':         {'fn': rename_item,         'risk': 'high',   'desc': 'Rename a file or folder'},
     'move_item':           {'fn': move_item,           'risk': 'high',   'desc': 'Move a file or folder'},
     'delete_item':         {'fn': delete_item,         'risk': 'high',   'desc': 'DELETE a file or folder permanently'},
     'kill_process':        {'fn': kill_process,        'risk': 'high',   'desc': 'Kill a running process by name/PID'},
     'run_command':         {'fn': run_command,         'risk': 'high',   'desc': 'Run a shell command'},
-    'run_powershell':      {'fn': run_powershell,      'risk': 'high',   'desc': 'Run a PowerShell script'},
+    'run_powershell':      {'fn': run_powershell,      'risk': 'high',   'desc': 'Run a PowerShell/pwsh script'},
+    'run_bash':            {'fn': run_bash,            'risk': 'high',   'desc': 'Run a bash/sh script (Mac/Linux)'},
     'run_python_script':   {'fn': run_python_script,   'risk': 'high',   'desc': 'Run a Python script file'},
 }
 

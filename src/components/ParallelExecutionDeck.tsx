@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useOffice } from '@/context/OfficeContext';
-import { GeneratedFile } from '@/types/office';
+import { Person, GeneratedFile } from '@/types/office';
 import {
   Code2,
   Terminal,
@@ -10,37 +10,84 @@ import {
   ExternalLink,
   Copy,
   Check,
-  CheckCircle2,
   FileCode,
-  Layers,
-  Sparkles,
   Eye,
+  EyeOff,
   Loader2,
-  X
+  X,
+  Monitor,
 } from 'lucide-react';
 
+const AGENT_THEME: Record<string, { border: string; headerText: string; iconBg: string; fileBorder: string; fileActiveBg: string; fileActiveText: string; genBadge: string }> = {
+  michael: {
+    border: 'border-cyan-500/30',
+    headerText: 'text-cyan-300',
+    iconBg: 'bg-cyan-950 border-cyan-800',
+    fileBorder: 'border-cyan-500',
+    fileActiveBg: 'bg-cyan-950/80',
+    fileActiveText: 'text-cyan-300',
+    genBadge: 'text-cyan-400 bg-cyan-950 border-cyan-800',
+  },
+  dave: {
+    border: 'border-emerald-500/30',
+    headerText: 'text-emerald-300',
+    iconBg: 'bg-emerald-950 border-emerald-800',
+    fileBorder: 'border-emerald-500',
+    fileActiveBg: 'bg-emerald-950/80',
+    fileActiveText: 'text-emerald-300',
+    genBadge: 'text-emerald-400 bg-emerald-950 border-emerald-800',
+  },
+  rex: {
+    border: 'border-orange-500/30',
+    headerText: 'text-orange-300',
+    iconBg: 'bg-orange-950 border-orange-800',
+    fileBorder: 'border-orange-500',
+    fileActiveBg: 'bg-orange-950/80',
+    fileActiveText: 'text-orange-300',
+    genBadge: 'text-orange-400 bg-orange-950 border-orange-800',
+  },
+  sarah: {
+    border: 'border-purple-500/30',
+    headerText: 'text-purple-300',
+    iconBg: 'bg-purple-950 border-purple-800',
+    fileBorder: 'border-purple-500',
+    fileActiveBg: 'bg-purple-950/80',
+    fileActiveText: 'text-purple-300',
+    genBadge: 'text-purple-400 bg-purple-950 border-purple-800',
+  },
+};
+
+const DEFAULT_THEME = {
+  border: 'border-indigo-500/30',
+  headerText: 'text-indigo-300',
+  iconBg: 'bg-indigo-950 border-indigo-800',
+  fileBorder: 'border-indigo-500',
+  fileActiveBg: 'bg-indigo-950/80',
+  fileActiveText: 'text-indigo-300',
+  genBadge: 'text-indigo-400 bg-indigo-950 border-indigo-800',
+};
+
+function getTheme(id: string) {
+  return AGENT_THEME[id] || DEFAULT_THEME;
+}
+
+function filesBelongTo(files: GeneratedFile[], person: Person): GeneratedFile[] {
+  return files.filter((f) => {
+    if (f.author && f.author.toLowerCase().includes(person.name.toLowerCase())) return true;
+    if (person.id === 'michael' && (f.path.endsWith('.html') || f.path.endsWith('.css') || (f.path.endsWith('.js') && !f.path.includes('backend')))) return true;
+    if (person.id === 'dave' && (f.path.includes('backend') || f.path.endsWith('.py') || f.path.endsWith('.md') || f.path.endsWith('.txt') || f.path.endsWith('.json'))) return true;
+    return false;
+  });
+}
+
 export default function ParallelExecutionDeck() {
-  const {
-    streams,
-    writtenFiles,
-    project,
-    targetPath,
-    openFolderInExplorer,
-    isExecuting,
-    selectedFile,
-    setSelectedFile
-  } = useOffice();
+  const { streams, writtenFiles, project, targetPath, openFolderInExplorer, isExecuting, selectedFile, setSelectedFile, people } = useOffice();
 
   const [copied, setCopied] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [inlinePreview, setInlinePreview] = useState(false);
 
-  const frontendFiles = writtenFiles.filter(
-    (f) => f.author.includes('Michael') || f.path.endsWith('.html') || f.path.endsWith('.css') || f.path.endsWith('.js')
-  );
-
-  const backendFiles = writtenFiles.filter(
-    (f) => f.author.includes('Dave') || f.path.includes('backend') || f.path.endsWith('.py') || f.path.endsWith('.md') || f.path.endsWith('.txt')
-  );
+  const htmlFile = writtenFiles.find((f) => f.name.endsWith('.html'));
 
   const handleCopyCode = () => {
     if (selectedFile?.content) {
@@ -50,188 +97,185 @@ export default function ParallelExecutionDeck() {
     }
   };
 
-  const htmlFile = writtenFiles.find((f) => f.name.endsWith('.html'));
+  // Which agents to show pods for: anyone with a stream, or anyone that's coding
+  const activePeople = people.filter(
+    (p) => p.id !== 'rex' && ((streams[p.id] && streams[p.id].trim()) || p.status === 'coding' || isExecuting)
+  );
+
+  // If nobody active, show Michael + Dave by default as "standing by"
+  const codeAgents = activePeople.length > 0
+    ? activePeople
+    : people.filter((p) => p.id === 'michael' || p.id === 'dave');
+
+  const cols = codeAgents.length === 1 ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2';
 
   return (
     <div className="space-y-4">
-      {/* Top Banner: Local Disk Write Status */}
+      {/* Completion Banner */}
       {project.status === 'completed' && writtenFiles.length > 0 && (
-        <div className="bg-gradient-to-r from-emerald-950/90 via-slate-900 to-cyan-950/90 border border-emerald-500/40 rounded-2xl p-4 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3 animate-fade-in">
+        <div className="bg-gradient-to-r from-emerald-950/90 via-slate-900 to-cyan-950/90 border border-emerald-500/40 rounded-2xl p-4 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400 flex items-center justify-center text-emerald-400 shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/60 flex items-center justify-center text-emerald-400 shrink-0">
               <FolderCheck className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                  <span>DISK WRITE COMPLETE</span>
-                  <span className="text-[10px] bg-emerald-900/80 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-600/50 font-mono">
-                    {writtenFiles.length} FILES WRITTEN TO PC
-                  </span>
-                </h3>
-              </div>
-              <p className="text-xs font-mono text-emerald-200/80 truncate max-w-xl mt-0.5" title={targetPath}>
-                Saved directly to: {targetPath}
-              </p>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                MISSION COMPLETE
+                <span className="text-[10px] bg-emerald-900/80 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-600/50 font-mono">
+                  {writtenFiles.length} FILES
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">{project.projectGoal?.slice(0, 60)}</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 w-full md:w-auto justify-end">
+          <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
             {htmlFile && (
               <button
-                onClick={() => setIsPreviewOpen(true)}
+                onClick={() => setInlinePreview((v) => !v)}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
               >
-                <Eye className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Preview UI</span>
+                {inlinePreview ? <EyeOff className="w-3.5 h-3.5 text-cyan-400" /> : <Eye className="w-3.5 h-3.5 text-cyan-400" />}
+                <span>{inlinePreview ? 'Hide Preview' : 'Live Preview'}</span>
               </button>
             )}
-
+            {htmlFile && (
+              <button
+                onClick={() => setPreviewOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
+              >
+                <Monitor className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Full Screen</span>
+              </button>
+            )}
             <button
               onClick={() => openFolderInExplorer(targetPath)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              <span>Open Folder on PC</span>
+              <span>Open Folder</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* Side-by-Side Parallel Workstream Decks */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Left Column: Michael's Frontend Deck */}
-        <div className="bg-slate-900/80 border border-cyan-500/30 rounded-2xl p-4 shadow-xl backdrop-blur-md flex flex-col justify-between">
-          <div>
-            {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-cyan-950 border border-cyan-800 flex items-center justify-center text-cyan-400 font-bold text-sm">
-                  💻
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-cyan-300">
-                    MICHAEL // FRONTEND POD
-                  </h3>
-                  <p className="text-[11px] text-slate-400">UI, Tailwind Layouts, Dynamic Client Logic</p>
-                </div>
-              </div>
-
-              {isExecuting ? (
-                <span className="flex items-center gap-1 text-[10px] font-mono text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800 animate-pulse">
-                  <Loader2 className="w-3 h-3 animate-spin" /> GENERATING
-                </span>
-              ) : (
-                <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
-                  {frontendFiles.length} deliverables
-                </span>
-              )}
+      {/* Inline Browser Preview */}
+      {inlinePreview && htmlFile && (
+        <div className="bg-slate-900 border border-indigo-500/30 rounded-2xl overflow-hidden shadow-2xl">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800 bg-slate-950">
+            <div className="flex items-center gap-2 text-xs font-mono text-slate-300">
+              <Eye className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Live Preview — {htmlFile.name}</span>
             </div>
-
-            {/* Michael's Live Output Stream */}
-            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 mb-3 font-mono text-xs text-slate-300 min-h-[90px] whitespace-pre-wrap leading-relaxed overflow-x-auto">
-              {streams.michael}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPreviewOpen(true)}
+                className="text-[10px] font-mono text-slate-400 hover:text-white hover:underline cursor-pointer"
+              >
+                Full Screen ↗
+              </button>
+              <button onClick={() => setInlinePreview(false)} className="p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-slate-300 cursor-pointer">
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
-
-            {/* Frontend Files List */}
-            {frontendFiles.length > 0 && (
-              <div className="space-y-1.5">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
-                  Files Created by Michael:
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {frontendFiles.map((file, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setSelectedFile(file)}
-                      className={`text-left p-2 rounded-lg border text-xs font-mono transition-all flex items-center justify-between cursor-pointer ${
-                        selectedFile?.path === file.path
-                          ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-md'
-                          : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 truncate">
-                        <FileCode className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                        <span className="truncate">{file.name}</span>
-                      </div>
-                      <span className="text-[10px] text-slate-500 ml-1 shrink-0">
-                        {Math.round(file.size / 1024 * 10) / 10}k
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+          </div>
+          <div className="bg-white" style={{ height: '420px' }}>
+            <iframe
+              title="Inline Preview"
+              srcDoc={htmlFile.content}
+              className="w-full h-full border-none"
+              sandbox="allow-scripts allow-modals"
+            />
           </div>
         </div>
+      )}
 
-        {/* Right Column: Dave's Backend Deck */}
-        <div className="bg-slate-900/80 border border-emerald-500/30 rounded-2xl p-4 shadow-xl backdrop-blur-md flex flex-col justify-between">
-          <div>
-            {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-emerald-950 border border-emerald-800 flex items-center justify-center text-emerald-400 font-bold text-sm">
-                  ⚙️
+      {/* Dynamic Agent Pods */}
+      <div className={`grid ${cols} gap-5`}>
+        {codeAgents.map((person) => {
+          const theme = getTheme(person.id);
+          const agentFiles = filesBelongTo(writtenFiles, person);
+          const stream = streams[person.id] || '';
+          const isActive = person.status === 'coding';
+
+          return (
+            <div
+              key={person.id}
+              className={`bg-slate-900/80 border ${theme.border} rounded-2xl p-4 shadow-xl backdrop-blur-md flex flex-col`}
+            >
+              {/* Pod Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-8 h-8 rounded-lg border flex items-center justify-center text-sm ${theme.iconBg}`}>
+                    {person.avatar || '🤖'}
+                  </div>
+                  <div>
+                    <h3 className={`text-xs font-bold font-mono uppercase tracking-wider ${theme.headerText}`}>
+                      {person.name} // {person.department || person.role.split(' ')[0].toUpperCase()} POD
+                    </h3>
+                    <p className="text-[11px] text-slate-400">{person.role}</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-emerald-300">
-                    DAVE // BACKEND POD
-                  </h3>
-                  <p className="text-[11px] text-slate-400">Flask REST API, JSON Routes, Server Specs</p>
-                </div>
+
+                {isActive || (isExecuting && !stream) ? (
+                  <span className={`flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded border animate-pulse ${theme.genBadge}`}>
+                    <Loader2 className="w-3 h-3 animate-spin" /> WORKING
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                    {agentFiles.length} deliverables
+                  </span>
+                )}
               </div>
 
-              {isExecuting ? (
-                <span className="flex items-center gap-1 text-[10px] font-mono text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800 animate-pulse">
-                  <Loader2 className="w-3 h-3 animate-spin" /> GENERATING
-                </span>
-              ) : (
-                <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
-                  {backendFiles.length} deliverables
-                </span>
+              {/* Live Stream Output */}
+              <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 mb-3 font-mono text-xs text-slate-300 min-h-[90px] whitespace-pre-wrap leading-relaxed overflow-x-auto flex-1">
+                {stream || (
+                  <span className="text-slate-600 italic">
+                    {person.name} standing by... waiting for directive.
+                  </span>
+                )}
+              </div>
+
+              {/* Files List */}
+              {agentFiles.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+                    Files by {person.name}:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1.5">
+                    {agentFiles.map((file, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setSelectedFile(file)}
+                        className={`text-left p-2 rounded-lg border text-xs font-mono transition-all flex items-center justify-between cursor-pointer ${
+                          selectedFile?.path === file.path
+                            ? `${theme.fileActiveBg} ${theme.fileBorder} ${theme.fileActiveText} shadow-md`
+                            : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 truncate">
+                          {person.id === 'dave' ? (
+                            <Terminal className={`w-3.5 h-3.5 shrink-0 ${theme.headerText}`} />
+                          ) : (
+                            <FileCode className={`w-3.5 h-3.5 shrink-0 ${theme.headerText}`} />
+                          )}
+                          <span className="truncate">{file.name}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 ml-1 shrink-0">
+                          {Math.round((file.size / 1024) * 10) / 10}k
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
-
-            {/* Dave's Live Output Stream */}
-            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 mb-3 font-mono text-xs text-slate-300 min-h-[90px] whitespace-pre-wrap leading-relaxed overflow-x-auto">
-              {streams.dave}
-            </div>
-
-            {/* Backend Files List */}
-            {backendFiles.length > 0 && (
-              <div className="space-y-1.5">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
-                  Files Created by Dave:
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {backendFiles.map((file, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setSelectedFile(file)}
-                      className={`text-left p-2 rounded-lg border text-xs font-mono transition-all flex items-center justify-between cursor-pointer ${
-                        selectedFile?.path === file.path
-                          ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300 shadow-md'
-                          : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 truncate">
-                        <Terminal className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span className="truncate">{file.name}</span>
-                      </div>
-                      <span className="text-[10px] text-slate-500 ml-1 shrink-0">
-                        {Math.round(file.size / 1024 * 10) / 10}k
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+          );
+        })}
       </div>
 
-      {/* Code Inspector (when a file is clicked) */}
+      {/* Code Inspector */}
       {selectedFile && (
         <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 shadow-2xl relative overflow-hidden">
           <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
@@ -242,7 +286,6 @@ export default function ParallelExecutionDeck() {
                 {selectedFile.author}
               </span>
             </div>
-
             <div className="flex items-center gap-2">
               <button
                 onClick={handleCopyCode}
@@ -253,30 +296,29 @@ export default function ParallelExecutionDeck() {
               </button>
               <button
                 onClick={() => setSelectedFile(null)}
-                className="p-1 rounded-lg hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors"
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
           </div>
-
           <pre className="p-4 bg-slate-900/90 rounded-xl overflow-x-auto text-xs font-mono text-slate-200 max-h-96 leading-relaxed selection:bg-cyan-500/30 selection:text-cyan-200">
             <code>{selectedFile.content}</code>
           </pre>
         </div>
       )}
 
-      {/* Live In-App Web Preview Modal */}
-      {isPreviewOpen && htmlFile && (
+      {/* Full-Screen Preview Modal */}
+      {previewOpen && htmlFile && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-950">
               <div className="flex items-center gap-2 text-xs font-mono text-slate-300">
                 <Eye className="w-4 h-4 text-cyan-400" />
-                <span>Live Browser Preview: {htmlFile.name}</span>
+                <span>Browser Preview — {htmlFile.name}</span>
               </div>
               <button
-                onClick={() => setIsPreviewOpen(false)}
+                onClick={() => setPreviewOpen(false)}
                 className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -284,7 +326,7 @@ export default function ParallelExecutionDeck() {
             </div>
             <div className="flex-1 bg-white">
               <iframe
-                title="Application Preview"
+                title="Full Preview"
                 srcDoc={htmlFile.content}
                 className="w-full h-full border-none"
                 sandbox="allow-scripts allow-modals"

@@ -34,13 +34,16 @@ export default function AISettingsModal() {
   };
 
   const availableModels = [
-    { id: 'ollama:llama3', label: '🦙 Ollama + Llama 3 (Free Open-Source Default)' },
-    { id: 'ollama:mistral', label: '🌪️ Ollama + Mistral (Free Open-Source Default)' },
-    { id: 'ollama:qwen', label: '⚡ Ollama + Qwen (Free Open-Source)' },
-    { id: 'ollama:gemma', label: '💎 Ollama + Gemma (Free Open-Source)' },
-    { id: 'gemini-2.0-flash', label: 'Google Gemini 2.0 Flash (API Key Required)' },
-    { id: 'claude-3-5-sonnet', label: 'Anthropic Claude 3.5 Sonnet (API Key Required)' },
-    { id: 'gpt-4o', label: 'OpenAI GPT-4o (API Key Required)' }
+    { id: 'gemini-3.8-flash', label: '⚡ Google Gemini 3.8 Flash (Recommended)' },
+    { id: 'gemini-2.5-pro', label: '🌟 Google Gemini 2.5 Pro (API Key Required)' },
+    { id: 'claude-sonnet-4-5', label: '🟠 Anthropic Claude Sonnet 4.5 (API Key Required)' },
+    { id: 'claude-opus-4', label: '🟠 Anthropic Claude Opus 4 (API Key Required)' },
+    { id: 'gpt-4o', label: '🟢 OpenAI GPT-4o (API Key Required)' },
+    { id: 'gpt-4o-mini', label: '🟢 OpenAI GPT-4o Mini (API Key Required)' },
+    { id: 'ollama:llama3', label: '🦙 Ollama + Llama 3 (Free, Local)' },
+    { id: 'ollama:mistral', label: '🌪️ Ollama + Mistral (Free, Local)' },
+    { id: 'ollama:qwen', label: '⚡ Ollama + Qwen (Free, Local)' },
+    { id: 'ollama:gemma', label: '💎 Ollama + Gemma (Free, Local)' },
   ];
 
   return (

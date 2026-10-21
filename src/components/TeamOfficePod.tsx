@@ -3,20 +3,10 @@
 import React from 'react';
 import { useOffice } from '@/context/OfficeContext';
 import { Person } from '@/types/office';
-import { UserPlus, Sparkles, Cpu, CheckCircle2, Loader2 } from 'lucide-react';
+import { UserPlus, Cpu, Loader2 } from 'lucide-react';
 
 export default function TeamOfficePod() {
-  const { people, updatePersonModel, setIsAddPersonOpen, setIsAISettingsOpen } = useOffice();
-
-  const availableModels = [
-    { id: 'ollama:llama3', label: '🦙 Ollama + Llama 3 (Free Open-Source)' },
-    { id: 'ollama:mistral', label: '🌪️ Ollama + Mistral (Free Open-Source)' },
-    { id: 'ollama:qwen', label: '⚡ Ollama + Qwen (Free Open-Source)' },
-    { id: 'ollama:gemma', label: '💎 Ollama + Gemma (Free Open-Source)' },
-    { id: 'gemini-2.0-flash', label: 'Google Gemini 2.0 Flash' },
-    { id: 'claude-3-5-sonnet', label: 'Anthropic Claude 3.5 Sonnet' },
-    { id: 'gpt-4o', label: 'OpenAI GPT-4o' }
-  ];
+  const { people, setIsAddPersonOpen, setIsAISettingsOpen } = useOffice();
 
   return (
     <div className="space-y-3">
@@ -92,31 +82,13 @@ export default function TeamOfficePod() {
                   </div>
                 </div>
 
-                {/* Assigned AI Model Selector */}
-                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5 mb-3">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5 font-mono">
-                    <span className="flex items-center gap-1">
-                      <Cpu className="w-3 h-3 text-cyan-400" />
-                      Assigned AI Model:
-                    </span>
-                    <button
-                      onClick={() => setIsAISettingsOpen(true)}
-                      className="text-cyan-400 hover:text-cyan-300 hover:underline text-[10px]"
-                    >
-                      Keys
-                    </button>
-                  </div>
-                  <select
-                    value={person.model}
-                    onChange={(e) => updatePersonModel(person.id, e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 font-sans cursor-pointer"
-                  >
-                    {availableModels.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
+                {/* Model info (read-only — change in AI Settings) */}
+                <div className="flex items-center gap-1.5 mb-3 text-[11px]">
+                  <Cpu className="w-3 h-3 text-slate-500" />
+                  <span className="text-slate-500 font-mono truncate">{person.model || 'gemini-3.8-flash'}</span>
+                  <button onClick={() => setIsAISettingsOpen(true)} className="ml-auto text-[10px] text-cyan-500 hover:text-cyan-300 hover:underline font-mono shrink-0 cursor-pointer">
+                    change
+                  </button>
                 </div>
 
                 {/* Skills Chips */}

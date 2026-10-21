@@ -2,12 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { useOffice } from '@/context/OfficeContext';
-import { Mic, MicOff, Send, HardDrive, Sparkles, FolderEdit, Play, Loader2, ArrowRight } from 'lucide-react';
+import { Mic, MicOff, Send, Sparkles, Play, Loader2, ArrowRight } from 'lucide-react';
 
 export default function VoiceChatConsole() {
   const {
     targetPath,
-    setTargetPath,
     executeParallelBuild,
     isExecuting,
     isVoiceActive,
@@ -17,8 +16,6 @@ export default function VoiceChatConsole() {
   } = useOffice();
 
   const [prompt, setPrompt] = useState<string>('Create a simple notes website with dark mode, tags, and search');
-  const [isEditingPath, setIsEditingPath] = useState<boolean>(false);
-  const [customPath, setCustomPath] = useState<string>(targetPath);
 
   // Sync voice transcript to prompt when speaking
   useEffect(() => {
@@ -27,20 +24,11 @@ export default function VoiceChatConsole() {
     }
   }, [voiceTranscript]);
 
-  useEffect(() => {
-    setCustomPath(targetPath);
-  }, [targetPath]);
-
   const handleRun = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!prompt.trim() || isExecuting) return;
 
-    await executeParallelBuild(prompt, customPath);
-  };
-
-  const handleSavePath = () => {
-    setTargetPath(customPath);
-    setIsEditingPath(false);
+    await executeParallelBuild(prompt, targetPath);
   };
 
   const quickPrompts = [
@@ -56,85 +44,6 @@ export default function VoiceChatConsole() {
       <div className="absolute top-0 right-1/4 w-96 h-32 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute bottom-0 left-1/4 w-96 h-32 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
-      {/* Target PC Path Selection Area */}
-      <div className="relative z-10 mb-4 bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5 w-full md:w-auto">
-          <div className="w-8 h-8 rounded-lg bg-cyan-950 border border-cyan-800 flex items-center justify-center text-cyan-400 shrink-0">
-            <HardDrive className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-slate-400">
-                WHERE TO CREATE ON YOUR PC:
-              </span>
-              <span className="text-[10px] text-emerald-400 bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-800/60 font-mono">
-                Hard Drive Direct
-              </span>
-            </div>
-            {!isEditingPath ? (
-              <p className="text-xs font-mono text-slate-200 truncate max-w-lg mt-0.5" title={targetPath}>
-                {targetPath}
-              </p>
-            ) : (
-              <div className="flex items-center gap-2 mt-1">
-                <input
-                  type="text"
-                  value={customPath}
-                  onChange={(e) => setCustomPath(e.target.value)}
-                  placeholder="C:\Users\YourName\Desktop\my-project"
-                  className="bg-slate-900 border border-cyan-500/60 rounded-lg px-3 py-1 text-xs text-white font-mono w-72 md:w-96 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={handleSavePath}
-                  className="px-2.5 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono"
-                >
-                  Save
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-          {!isEditingPath && (
-            <button
-              type="button"
-              onClick={() => setIsEditingPath(true)}
-              className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-mono hover:underline"
-            >
-              <FolderEdit className="w-3.5 h-3.5" />
-              <span>Change Path</span>
-            </button>
-          )}
-
-          {/* Quick preset chips */}
-          <div className="hidden lg:flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                const p = '~/Desktop/notes-website';
-                setTargetPath(p);
-                setCustomPath(p);
-              }}
-              className="text-[10px] font-mono bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-slate-300 px-2 py-1 rounded"
-            >
-              ~/Desktop/notes-website
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const p = '~/Desktop/task-tracker';
-                setTargetPath(p);
-                setCustomPath(p);
-              }}
-              className="text-[10px] font-mono bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-slate-300 px-2 py-1 rounded"
-            >
-              ~/Desktop/task-tracker
-            </button>
-          </div>
-        </div>
-      </div>
 
       {/* Auto-Process Status Sub-bar */}
       <div className="relative z-10 mb-2 flex items-center justify-between px-1 text-xs">
@@ -201,7 +110,7 @@ export default function VoiceChatConsole() {
             )}
           </div>
 
-          {/* Launch Parallel Build Button */}
+          {/* Deploy Squad Button */}
           <button
             type="submit"
             disabled={isExecuting || !prompt.trim()}
@@ -210,12 +119,12 @@ export default function VoiceChatConsole() {
             {isExecuting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-white" />
-                <span>Building in Parallel...</span>
+                <span>Squad Working...</span>
               </>
             ) : (
               <>
                 <Play className="w-4 h-4 fill-white" />
-                <span>Run Parallel Build</span>
+                <span>Deploy Squad</span>
                 <ArrowRight className="w-4 h-4 opacity-70" />
               </>
             )}

@@ -51,10 +51,30 @@ export interface ProjectState {
   startedAt?: string;
 }
 
-export interface ParallelStreams {
-  michael: string;
-  dave: string;
-  sarah?: string;
+export type ParallelStreams = Record<string, string>;
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'agent' | 'system';
+  agentId?: string;
+  agentName?: string;
+  agentAvatar?: string;
+  content: string;
+  timestamp: string;
+  type: 'text' | 'build_result' | 'rex_plan' | 'error' | 'thinking';
+  files?: GeneratedFile[];
+  rexPlan?: {
+    tasks: Array<{ tool: string; args: Record<string, unknown>; risk: string; description: string }>;
+    requires_confirmation: boolean;
+    pending_permissions: string[];
+  };
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: string;
+  messages: ChatMessage[];
 }
 
 export interface ProjectHistoryItem {
