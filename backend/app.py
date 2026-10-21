@@ -21,6 +21,7 @@ from routes.training import training_bp
 from routes.messages import messages_bp
 from routes.project import project_bp
 from routes.research import research_bp
+from routes.rex import rex_bp
 
 load_dotenv()
 
@@ -48,6 +49,7 @@ def create_app():
     app.register_blueprint(messages_bp, url_prefix='/api')
     app.register_blueprint(project_bp, url_prefix='/api')
     app.register_blueprint(research_bp, url_prefix='/api')
+    app.register_blueprint(rex_bp, url_prefix='/api')
 
     @app.route('/')
     def root():
