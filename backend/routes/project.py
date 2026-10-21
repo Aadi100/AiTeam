@@ -747,8 +747,8 @@ def build_project_parallel():
             future_fe = executor.submit(generate_frontend_code, frontend_task, api_keys, michael_model)
             future_be = executor.submit(generate_backend_code,  backend_task,  api_keys, dave_model)
 
-            frontend_files = future_fe.result()
-            backend_files  = future_be.result()
+            frontend_files = future_fe.result(timeout=300)
+            backend_files  = future_be.result(timeout=300)
 
         all_files = frontend_files + backend_files
 
