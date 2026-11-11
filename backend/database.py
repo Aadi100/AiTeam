@@ -27,7 +27,6 @@ def init_db(app=None):
     try:
         connection = me.connect(host=MONGO_URI, alias='default', serverSelectionTimeoutMS=3000)
         print(f"[OK] Connected to MongoDB via MongoEngine: {MONGO_URI}")
-        seed_initial_data()
         return connection
     except Exception as e:
         print(f"[WARN] Could not connect to MongoDB at {MONGO_URI}: {e}")

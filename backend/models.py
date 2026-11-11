@@ -269,3 +269,168 @@ class ProjectHistoryDocument(me.Document):
             'modelsUsed': self.models_used,
             'createdAt': self.created_at.isoformat() if self.created_at else ''
         }
+
+
+# ───────────────────────── Orchestrator (agent map) ─────────────────────────
+
+class RunDocument(me.Document):
+    """One user goal. The root node of the agent map."""
+    run_id = me.StringField(unique=True, required=True)
+    goal = me.StringField(required=True)
+    project_name = me.StringField(default='')
+    summary = me.StringField(default='')
+    contract = me.StringField(default='')          # shared interface notes given to every worker
+    target_path = me.StringField(required=True)
+    status = me.StringField(default='planning')    # planning|running|completed|failed|cancelled
+    planner_model = me.StringField(default='')
+    worker_model = me.StringField(default='')
+    max_tokens = me.IntField(default=0)            # 0 = unlimited budget
+    tokens_in = me.IntField(default=0)
+    tokens_out = me.IntField(default=0)
+    cancel_requested = me.BooleanField(default=False)
+    error = me.StringField(default='')
+    source = me.StringField(default='manual')      # manual|voice|schedule
+    owner = me.StringField(default='')
+    verify = me.BooleanField(default=False)        # run the generated project and auto-fix
+    suggested = me.ListField(me.DictField(), default=list)   # [{title, command, cwd}] to run the result
+    created_at = me.DateTimeField(default=datetime.utcnow)
+    started_at = me.DateTimeField()
+    ended_at = me.DateTimeField()
+
+    meta = {'collection': 'runs', 'ordering': ['-created_at'], 'indexes': ['run_id', 'status', '-created_at']}
+
+    def to_dict(self):
+        return {
+            'id': self.run_id, 'goal': self.goal, 'projectName': self.project_name,
+            'summary': self.summary, 'targetPath': self.target_path, 'status': self.status,
+            'plannerModel': self.planner_model, 'workerModel': self.worker_model,
+            'maxTokens': self.max_tokens, 'tokensIn': self.tokens_in, 'tokensOut': self.tokens_out,
+            'tokens': self.tokens_in + self.tokens_out, 'error': self.error, 'source': self.source,
+            'owner': self.owner, 'verify': self.verify, 'suggested': self.suggested,
+            'createdAt': self.created_at.isoformat() + 'Z' if self.created_at else None,
+            'startedAt': self.started_at.isoformat() + 'Z' if self.started_at else None,
+            'endedAt': self.ended_at.isoformat() + 'Z' if self.ended_at else None,
+        }
+
+
+class AgentTaskDocument(me.Document):
+    """One sub-agent in the map. Agents are created per plan, never fixed."""
+    task_id = me.StringField(unique=True, required=True)
+    run_id = me.StringField(required=True)
+    key = me.StringField(required=True)            # planner-assigned short key
+    parent_id = me.StringField(default='')         # '' = child of the run root
+    kind = me.StringField(default='module')        # module|review
+    title = me.StringField(required=True)
+    description = me.StringField(default='')
+    folder = me.StringField(default='')            # the only directory this agent may write in
+    depends_on = me.ListField(me.StringField(), default=list)   # task_ids
+    status = me.StringField(default='queued')      # queued|running|done|failed|skipped|cancelled
+    model = me.StringField(default='')
+    attempts = me.IntField(default=0)
+    tokens_in = me.IntField(default=0)
+    tokens_out = me.IntField(default=0)
+    summary = me.StringField(default='')
+    error = me.StringField(default='')
+    files = me.ListField(me.DictField(), default=list)
+    log = me.ListField(me.DictField(), default=list)
+    order = me.IntField(default=0)
+    started_at = me.DateTimeField()
+    ended_at = me.DateTimeField()
+
+    meta = {'collection': 'agent_tasks', 'indexes': ['task_id', 'run_id', 'status']}
+
+    def to_dict(self, detail=False):
+        d = {
+            'id': self.task_id, 'runId': self.run_id, 'key': self.key, 'parentId': self.parent_id,
+            'kind': self.kind, 'title': self.title, 'description': self.description,
+            'folder': self.folder, 'dependsOn': self.depends_on, 'status': self.status,
+            'model': self.model, 'attempts': self.attempts,
+            'tokensIn': self.tokens_in, 'tokensOut': self.tokens_out,
+            'tokens': self.tokens_in + self.tokens_out, 'summary': self.summary, 'error': self.error,
+            'fileCount': len(self.files), 'order': self.order,
+            'startedAt': self.started_at.isoformat() + 'Z' if self.started_at else None,
+            'endedAt': self.ended_at.isoformat() + 'Z' if self.ended_at else None,
+            'lastLog': self.log[-1]['msg'] if self.log else '',
+        }
+        if detail:
+            d['files'] = self.files
+            d['log'] = self.log
+        return d
+
+
+class BackgroundJobDocument(me.Document):
+    """A shell job (dev server, tests, n8n...) started from the Background tasks panel."""
+    job_id = me.StringField(unique=True, required=True)
+    title = me.StringField(required=True)
+    command = me.StringField(required=True)
+    cwd = me.StringField(required=True)
+    status = me.StringField(default='running')      # running|exited|failed|stopped|lost
+    pid = me.IntField(default=0)
+    exit_code = me.IntField()
+    log_tail = me.StringField(default='')
+    created_at = me.DateTimeField(default=datetime.utcnow)
+    ended_at = me.DateTimeField()
+
+    meta = {'collection': 'background_jobs', 'ordering': ['-created_at']}
+
+    def to_dict(self):
+        return {'id': self.job_id, 'title': self.title, 'command': self.command, 'cwd': self.cwd,
+                'status': self.status, 'pid': self.pid, 'exitCode': self.exit_code,
+                'createdAt': self.created_at.isoformat() + 'Z',
+                'endedAt': self.ended_at.isoformat() + 'Z' if self.ended_at else None}
+
+
+class MemoryDocument(me.Document):
+    """Long-term notes (preferences, past builds) injected into the planner prompt."""
+    mem_id = me.StringField(unique=True, required=True)
+    text = me.StringField(required=True)
+    kind = me.StringField(default='note')           # note|preference|build
+    vector = me.ListField(me.FloatField(), default=list)   # embedding, when an embedding model is available
+    created_at = me.DateTimeField(default=datetime.utcnow)
+
+    meta = {'collection': 'memories', 'ordering': ['-created_at']}
+
+    def to_dict(self):
+        return {'id': self.mem_id, 'text': self.text, 'kind': self.kind,
+                'createdAt': self.created_at.isoformat() + 'Z'}
+
+
+class ScheduleDocument(me.Document):
+    """Recurring goal. Runs unattended, so it uses env/Ollama models only (keys are never stored)."""
+    sched_id = me.StringField(unique=True, required=True)
+    name = me.StringField(required=True)
+    goal = me.StringField(required=True)
+    target_path = me.StringField(required=True)
+    every_minutes = me.IntField(default=0)          # interval mode when > 0
+    daily_at = me.StringField(default='')           # 'HH:MM' local time when every_minutes == 0
+    planner_model = me.StringField(default='')
+    worker_model = me.StringField(default='')
+    max_tokens = me.IntField(default=0)
+    enabled = me.BooleanField(default=True)
+    keys_enc = me.StringField(default='')          # Fernet-encrypted API keys (opt-in)
+    owner = me.StringField(default='')
+    last_run_at = me.DateTimeField()
+    last_run_id = me.StringField(default='')
+    created_at = me.DateTimeField(default=datetime.utcnow)
+
+    meta = {'collection': 'schedules', 'ordering': ['-created_at']}
+
+    def to_dict(self):
+        return {'id': self.sched_id, 'name': self.name, 'goal': self.goal, 'targetPath': self.target_path,
+                'everyMinutes': self.every_minutes, 'dailyAt': self.daily_at,
+                'plannerModel': self.planner_model, 'workerModel': self.worker_model,
+                'maxTokens': self.max_tokens, 'enabled': self.enabled, 'lastRunId': self.last_run_id,
+                'hasKeys': bool(self.keys_enc), 'owner': self.owner,
+                'lastRunAt': self.last_run_at.isoformat() + 'Z' if self.last_run_at else None}
+
+
+class UserDocument(me.Document):
+    username = me.StringField(unique=True, required=True)
+    password_hash = me.StringField(required=True)
+    role = me.StringField(default='member')        # admin | member | viewer
+    created_at = me.DateTimeField(default=datetime.utcnow)
+
+    meta = {'collection': 'users'}
+
+    def to_dict(self):
+        return {'username': self.username, 'role': self.role, 'createdAt': self.created_at.isoformat() + 'Z'}

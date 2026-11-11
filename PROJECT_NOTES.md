@@ -1,217 +1,61 @@
-# DevSquad Mission Control — Project Notes
+# DevSquad Mission Control: Project Notes
 
-> A full-stack "autonomous AI office" app: a Next.js 16 frontend with a Python Flask backend.
-> Three AI agents (Michael, Dave, Sarah) receive voice or text directives, generate code in parallel, and write real files to the user's PC hard drive.
+A planner splits one goal into modules and spawns one agent per module. The agents run in parallel, and you
+watch them live on an **agent map**. There are no fixed agents.
 
----
+## Run it
+```bash
+# MongoDB must be running on localhost:27017
+cd backend && python -m venv venv && venv\Scripts\pip install -r requirements.txt && venv\Scripts\python app.py   # :5000
+npm install && npm run dev -- -p 3001                                                                          # UI
+```
+Login password: `APP_PASSWORD` in `backend/.env`, otherwise a random one is generated in `backend/.auth.json` (git-ignored).
 
-## Stack
+## Flow
+1. `POST /api/runs {goal, targetPath, plannerModel, workerModel, maxTokens, apiKeys}` creates a Run.
+2. **Planner** (strong model) returns modules, each with its own folder, `depends_on`, and a shared **contract**.
+3. **Engine** (`backend/orchestrator/engine.py`) creates one `AgentTask` per module and schedules them on a worker pool
+   (`MAX_WORKERS`, default 6). Independent modules run simultaneously. Dependent ones wait. Failed tasks retry once, and their dependents are skipped.
+4. **Worker** (`worker.py`) writes files only inside its own folder (`sandbox.py`), runs fixed syntax checks
+   (python compile, `node --check`, JSON parse) and feeds errors back to the model for up to 3 passes.
+5. A final **review** agent writes root-level README and glue files and audits syntax.
+6. `GET /api/runs/<id>/stream` (SSE) pushes live snapshots to the agent map.
 
-| Layer | Technology |
+## Features
+| Area | Where |
 |---|---|
-| Frontend | Next.js 16.4.1 (App Router), React 19, Tailwind CSS v4, Turbopack |
-| UI Icons | lucide-react ^1.57.0 |
-| Confetti | canvas-confetti |
-| Backend | Python Flask 3, Flask-CORS |
-| Database | MongoDB (local) via MongoEngine |
-| AI (default) | Ollama — Llama 3 (Michael), Mistral (Dave), Gemma (Sarah) |
-| AI (paid) | Google Gemini, Anthropic Claude, OpenAI GPT-4o |
-| Voice | Web Speech API (webkitSpeechRecognition) — browser only |
-| Speech output | SpeechSynthesis API — browser only |
+| Task/run model with status, time, tokens, retries, dependencies | `models.py` (`RunDocument`, `AgentTaskDocument`) |
+| Token tracking, budget auto-stop, cancel | `worker.charge`, `engine.cancel_run` |
+| Retry one failed/skipped agent (and what it blocked) | `engine.retry_task`, `POST /runs/<id>/tasks/<tid>/retry` |
+| Helper sub-agents (one level) spawned by a module agent | `worker._spawn_children` |
+| Optional run-and-fix: start the generated app, GET /, model repairs failures | `orchestrator/verify.py`, `worker.run_integration` |
+| "Run the result" suggestions (python / npm / static) | `verify.detect_commands`, shown on the map |
+| Model routing (planner vs worker; Claude/Gemini/OpenAI/Ollama) | `orchestrator/llm.py` |
+| File safety (no `..`, no absolute paths, extension block, size caps, `ALLOWED_ROOTS`) | `sandbox.py`, `auth.py` |
+| Accounts + roles (admin / member / viewer), signed tokens, rate-limited login | `auth.py` |
+| Background tasks panel (admin only: it runs shell commands) | `routes/jobs.py` |
+| Memory: embedding recall (Ollama `nomic-embed-text` or OpenAI), keyword fallback | `routes/memory.py` |
+| Schedules; optional API keys stored encrypted (Fernet) | `routes/schedules.py`, `auth.encrypt_json` |
+| Voice: browser SpeechRecognition, Whisper fallback for any browser | `src/lib/hooks.ts`, `routes/voice.py` |
 
----
+## Roles
+- **admin**: everything, including users, shell background jobs, all runs.
+- **member**: start/cancel/retry own runs, memory, own schedules.
+- **viewer**: read-only, can see all runs.
 
-## Architecture
+## Env vars (`backend/.env`)
+`MONGO_URI`, `PORT`, `HOST` (default 127.0.0.1), `APP_PASSWORD` (initial `admin` password), `ALLOWED_ROOTS`
+(default: your home folder), `MAX_WORKERS`, `PLANNER_MODEL`, `WORKER_MODEL`, `GEMINI_API_KEY`, `CLAUDE_API_KEY`,
+`OPENAI_API_KEY`, `OLLAMA_URL`, `EMBED_MODEL` (default `nomic-embed-text`).
 
-```
-Browser (Next.js)
-  └─ /api/py/* proxy (next.config.ts)
-        └─ Flask backend  :5000
-              └─ MongoDB  :27017/devsquad
-```
-
-The Next.js dev server proxies `/api/py/:path*` → `http://127.0.0.1:5000/api/:path*`.  
-The frontend uses `/api/py` as the base URL by default (no `NEXT_PUBLIC_BACKEND_URL` env var needed for local dev).
-
----
-
-## Directory Layout
-
-```
-dev-squad/
-├── src/
-│   ├── app/
-│   │   ├── layout.tsx          Root layout — Geist font, dark theme
-│   │   ├── page.tsx            Root page — wraps everything in <OfficeProvider>
-│   │   └── globals.css         Tailwind import, CSS vars, scrollbar, fadeIn animation
-│   ├── components/
-│   │   ├── CockpitHeader.tsx         Sticky nav: logo, MongoDB badge, mic, history, add-person
-│   │   ├── SatelliteRadar.tsx        Animated radar with agent blips
-│   │   ├── TeamOfficePod.tsx         Agent cards grid with model selector dropdowns
-│   │   ├── VoiceChatConsole.tsx      Target path editor + voice/text prompt + Run button
-│   │   ├── ParallelExecutionDeck.tsx Michael & Dave live stream columns + file inspector
-│   │   ├── AISettingsModal.tsx       API key inputs (Gemini / Claude / OpenAI / Ollama URL)
-│   │   ├── AddPersonModal.tsx        Add a custom agent (saved to MongoDB)
-│   │   ├── ProjectHistoryModal.tsx   Full-screen history browser + HTML preview iframe
-│   │   └── GlobalVoiceBar.tsx        Fixed floating mic dock (bottom-right)
-│   ├── context/
-│   │   └── OfficeContext.tsx         All global state + all backend fetch calls
-│   └── types/
-│       └── office.ts                 TypeScript interfaces for Person, AIKeys, ProjectState, etc.
-├── backend/
-│   ├── app.py                Flask factory — registers 7 blueprints, enables CORS
-│   ├── database.py           MongoEngine connect + seed (Michael, Dave, Sarah + ProjectState)
-│   ├── models.py             MongoEngine document schemas (8 collections)
-│   ├── requirements.txt      Flask, Flask-CORS, pymongo, mongoengine, python-dotenv, requests
-│   ├── reset_db.py           Standalone script to wipe and re-seed MongoDB
-│   ├── .env                  MONGO_URI, PORT, FLASK_ENV
-│   └── routes/
-│       ├── project.py        Core build engine — parallel generation + disk write + history
-│       ├── agents.py         Agent CRUD (deploy, update model, pause/resume)
-│       ├── health.py         GET /api/health — MongoDB connectivity + collection counts
-│       ├── tasks.py          Task CRUD + parallel dispatch
-│       ├── messages.py       Message log (channel-scoped)
-│       ├── training.py       Training pairs, custom model export (JSONL / Modelfile)
-│       └── research.py       Research brief stubs
-├── next.config.ts            cacheComponents, partialPrefetching, Turbopack, /api/py proxy
-├── tsconfig.json             target ES2017, moduleResolution bundler, @/* alias → ./src/*
-├── .env.local                Documents NEXT_PUBLIC_BACKEND_URL (commented out by default)
-└── PROJECT_NOTES.md          This file
-```
-
----
-
-## MongoDB Collections
-
-| Collection | Document class | Purpose |
-|---|---|---|
-| `agents` | `AgentDocument` | People / AI agent nodes |
-| `tasks` | `TaskDocument` | Assigned work items |
-| `training_pairs` | `TrainingPairDocument` | Prompt-response pairs for fine-tuning |
-| `custom_models` | `CustomModelDocument` | Fine-tuned model configs |
-| `messages` | `MessageDocument` | Channel message log |
-| `project_state` | `ProjectStateDocument` | Singleton current mission state |
-| `research_briefs` | `ResearchBriefDocument` | Research summaries |
-| `project_history` | `ProjectHistoryDocument` | Every completed parallel build |
-
----
-
-## How the Parallel Build Works
-
-1. User types or speaks a prompt → hits **Run Parallel Build**
-2. Frontend POSTs to `/api/py/project/build` with `{ prompt, targetPath, apiKeys }`
-3. Backend looks up Michael's model and Dave's model from MongoDB
-4. `ThreadPoolExecutor(max_workers=2)` runs both generators concurrently:
-   - `generate_frontend_code()` → calls AI → returns `index.html`, `styles.css`, `app.js`
-   - `generate_backend_code()` → calls AI → returns `backend/app.py`, `backend/requirements.txt`, `README.md`
-5. All 6 files are written to `targetPath` on disk (`os.makedirs` + `open(..., 'w')`)
-6. Agent stats updated in MongoDB, history record saved, system message logged
-7. Response JSON includes file paths + content → frontend displays them in the stream columns
-
-### AI Model Resolution
-
-```
-User assigns model in UI
-        │
-        ▼
-  starts with "ollama:" ?
-     YES → Ollama endpoint (http://localhost:11434 or custom URL)
-              │
-              ├─ Ollama reachable? → use AI response for index.html / app.py
-              └─ Ollama unreachable? → fall back to hardcoded template
-     NO  → paid key present?
-              │
-              ├─ gemini key   → Google Gemini API
-              ├─ claude key   → Anthropic Claude API
-              └─ openai key   → OpenAI API
-                     │
-                     └─ AI response used if it contains <!DOCTYPE / from flask
-                        otherwise fall back to hardcoded template
-```
-
----
-
-## Key State — OfficeContext
-
-Everything lives in `src/context/OfficeContext.tsx`. The main pieces:
-
-| State | Type | What it holds |
-|---|---|---|
-| `people` | `Person[]` | All agents (synced from MongoDB on mount) |
-| `targetPath` | `string` | Where to write files; persisted to `localStorage` |
-| `aiKeys` | `AIKeys` | Gemini / Claude / OpenAI keys + Ollama URL; persisted to `localStorage` |
-| `project` | `ProjectState` | Current mission name, status, progress |
-| `streams` | `ParallelStreams` | Live text shown in Michael and Dave columns |
-| `writtenFiles` | `GeneratedFile[]` | Files from the last build (content + path + author) |
-| `isExecuting` | `boolean` | Locks the UI during a build |
-| `isVoiceActive` | `boolean` | Drives Web Speech recognition lifecycle |
-| `history` | `ProjectHistoryItem[]` | Past builds fetched from MongoDB |
-
----
-
-## Voice System
-
-- Uses `webkitSpeechRecognition` (Chrome / Edge)
-- **Auto-process mode** (default on): fires the parallel build automatically after 1.2 s of silence or when a final speech result arrives — no button click needed
-- Global hotkey: `Alt+V` or `Ctrl+Space` toggles listening
-- Speech synthesis reads build status back to the user
-
----
-
-## Env Vars
-
-| Variable | Where | Default | Purpose |
-|---|---|---|---|
-| `NEXT_PUBLIC_BACKEND_URL` | `.env.local` | *(unset — uses proxy)* | Override backend origin for production |
-| `MONGO_URI` | `backend/.env` | `mongodb://localhost:27017/devsquad` | MongoDB connection string |
-| `PORT` | `backend/.env` | `5000` | Flask listen port |
-| `FLASK_ENV` | `backend/.env` | `development` | Flask mode |
-
----
-
-## Running Locally
-
-```bash
-# 1. Start MongoDB (must be running on localhost:27017)
-
-# 2. Backend
-cd backend
-pip install -r requirements.txt
-python app.py
-# Flask starts on http://localhost:5000
-
-# 3. Frontend (separate terminal)
-npm install
-npm run dev
-# Next.js starts on http://localhost:3000
-```
-
-To reset the database back to the three default agents:
-```bash
-cd backend
-python reset_db.py
-```
-
----
-
-## Bugs Fixed
-
-| Bug | Root cause | Fix |
-|---|---|---|
-| Backend crashes on start | `mongoengine` not in `requirements.txt` | Added `mongoengine>=0.27.0` |
-| AI never used — always same template | `call_ai_model()` return value was discarded | Capture response, extract code block, use when valid |
-| `~/Desktop/...` paths silently broken | `os.path.abspath()` does not expand `~` | Added `os.path.expanduser()` before `abspath` |
-| Frontend bypassed Next.js proxy | `BACKEND_URL` defaulted to `http://localhost:5000`; proxy at `/api/py` was dead code | Default changed to `/api/py` (through proxy); env var still overrides for production |
-| Hardcoded `C:\Users\Abdul Hadi\...` paths | Machine-specific username baked into source | Replaced with `~/Desktop/...` (expanded server-side) |
-| `z-60` Tailwind class missing | Tailwind v4 default scale stops at `z-50` | Changed to `z-[60]` (arbitrary value syntax) |
-| Dead npm packages | `three`, `file-saver`, `jszip` listed but never imported | Removed all three + their `@types` packages |
-
----
-
-## Known Limitations
-
-- **AI generation quality**: When Ollama is running, the AI response is used as `index.html` (and `app.py`), but `styles.css` and `app.js` are always the hardcoded templates. Extending to full AI generation for all files requires either one structured JSON response or separate AI calls per file.
-- **Voice recognition**: Only works in Chromium-based browsers (Chrome, Edge). Firefox does not support `webkitSpeechRecognition`.
-- **Windows-only folder open**: `os.startfile()` is Windows-specific. Linux/macOS falls back to `xdg-open`.
-- **MongoDB must be local**: No hosted Atlas support out of the box — change `MONGO_URI` in `backend/.env` to use Atlas.
-- **No auth**: The app has no authentication layer. Anyone who can reach port 3000 can trigger file writes to the server's disk.
+## Known limits
+- Local 7B models work but are slow, and Ollama may serialise requests, which reduces real parallelism. They also leave
+  integration bugs the fixer can't repair (for example a Flask app with no `/` route); use a stronger model for planner and workers.
+- Run-and-fix executes generated Python on your machine. It is opt-in per run, and the child process gets no API keys or
+  database URI, but it is not a container. Only Python/Flask entry points are smoke-tested.
+- Embedding recall needs an embedding model (`ollama pull nomic-embed-text`). Without one, memory uses word overlap.
+- Stored schedule keys are encrypted with a secret kept in `backend/.auth.json` on the same machine. That protects a database
+  leak, not someone with access to the whole folder.
+- Helper agents go one level deep only.
+- `backend/routes/rex.py` and the other legacy routes (tasks, training, messages, research) are untouched and no longer used by the UI.
+  The old fixed-agent routes (`agents`, `project`) are unregistered.

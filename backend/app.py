@@ -16,12 +16,16 @@ from database import init_db
 # Import route blueprints
 from routes.health import health_bp
 from routes.tasks import tasks_bp
-from routes.agents import agents_bp
 from routes.training import training_bp
 from routes.messages import messages_bp
-from routes.project import project_bp
 from routes.research import research_bp
 from routes.rex import rex_bp
+from routes.runs import runs_bp
+from routes.jobs import jobs_bp, mark_lost_on_boot
+from routes.memory import memory_bp
+from routes.schedules import schedules_bp, start_scheduler
+from routes.voice import voice_bp
+from auth import auth_bp, require_auth
 
 load_dotenv()
 
@@ -44,12 +48,21 @@ def create_app():
     # Register all API Blueprints with prefix /api
     app.register_blueprint(health_bp, url_prefix='/api')
     app.register_blueprint(tasks_bp, url_prefix='/api')
-    app.register_blueprint(agents_bp, url_prefix='/api')
     app.register_blueprint(training_bp, url_prefix='/api')
     app.register_blueprint(messages_bp, url_prefix='/api')
-    app.register_blueprint(project_bp, url_prefix='/api')
     app.register_blueprint(research_bp, url_prefix='/api')
     app.register_blueprint(rex_bp, url_prefix='/api')
+    app.register_blueprint(runs_bp, url_prefix='/api')
+    app.register_blueprint(jobs_bp, url_prefix='/api')
+    app.register_blueprint(memory_bp, url_prefix='/api')
+    app.register_blueprint(schedules_bp, url_prefix='/api')
+    app.register_blueprint(voice_bp, url_prefix='/api')
+    app.register_blueprint(auth_bp, url_prefix='/api')
+    app.before_request(require_auth)
+    mark_lost_on_boot()
+    from orchestrator.engine import recover_interrupted
+    recover_interrupted()
+    start_scheduler()
 
     @app.route('/')
     def root():
@@ -91,4 +104,4 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     print(f"\n[INFO] DevSquad Flask Backend starting on http://localhost:{port}")
     print(f"[OK] Connected to local MongoDB via MongoEngine")
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host=os.getenv('HOST', '127.0.0.1'), port=port, debug=False, threaded=True)
