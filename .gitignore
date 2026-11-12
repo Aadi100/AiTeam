@@ -43,3 +43,7 @@ __pycache__/
 *.pyc
 .auth.json
 venv/
+backend/.shots/
+
+# keep the template
+!.env.example

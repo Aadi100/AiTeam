@@ -6,7 +6,7 @@ from flask import Blueprint, request, jsonify, Response, stream_with_context
 
 from models import RunDocument, AgentTaskDocument
 from orchestrator import engine
-from auth import path_allowed, current_user, is_admin
+from auth import path_allowed, current_user, is_admin, with_stored_key, make_preview_token
 from routes.memory import recall
 
 runs_bp = Blueprint('runs', __name__)
@@ -51,10 +51,19 @@ def start_run():
         return jsonify({'error': 'targetPath is required'}), 400
     if not path_allowed(target):
         return jsonify({'error': 'targetPath is outside the allowed folders (set ALLOWED_ROOTS on the server)'}), 403
+    cont = (b.get('continueRunId') or '').strip()
+    if cont:   # a follow-up change must target a project this user may modify, inside an allowed folder
+        parent, err = _get(cont, modify=True)
+        if err:
+            return err
+        if not path_allowed(parent.target_path):
+            return jsonify({'error': 'that project folder is outside the allowed folders'}), 403
     run = engine.create_run(
-        goal, target, b.get('apiKeys') or {}, b.get('plannerModel', ''), b.get('workerModel', ''),
+        goal, target, with_stored_key(b.get('apiKeys'), current_user()['u']), b.get('plannerModel', ''), b.get('workerModel', ''),
         b.get('maxTokens') or 0, source=b.get('source', 'manual'), memory=recall(goal),
-        owner=current_user()['u'], verify_run=bool(b.get('verify')))
+        owner=current_user()['u'], verify_run=bool(b.get('verify')), web_search=bool(b.get('webSearch')),
+        review_plan=bool(b.get('reviewPlan')), continue_from=cont,
+        deep_plan=b.get('deepPlan', True) is not False)
     return jsonify(run.to_dict()), 201
 
 
@@ -120,7 +129,7 @@ def retry(run_id, task_id):
         return err
     b = request.get_json(silent=True) or {}
     try:
-        engine.retry_task(run_id, task_id, b.get('apiKeys') or {}, b.get('maxTokens'))
+        engine.retry_task(run_id, task_id, with_stored_key(b.get('apiKeys'), current_user()['u']), b.get('maxTokens'))
     except LookupError:
         return jsonify({'error': 'not found'}), 404
     except RuntimeError as e:
@@ -153,3 +162,113 @@ def get_task_file(run_id, task_id):
             return jsonify({'path': path, 'content': fp.read()})
     except (OSError, sandbox.SandboxError) as e:
         return jsonify({'error': str(e)}), 404
+
+
+def _resume(fn, run_id, *args):
+    run, err = _get(run_id, modify=True)
+    if err:
+        return err
+    try:
+        fn(run_id, *args)
+    except LookupError:
+        return jsonify({'error': 'not found'}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 409
+    return jsonify(snapshot(run_id))
+
+
+@runs_bp.route('/runs/<run_id>/answers', methods=['POST'])
+def answers(run_id):
+    """Answer the planner's or an agent's questions and resume the run."""
+    b = request.get_json(silent=True) or {}
+    return _resume(engine.answer_questions, run_id, b.get('answers') or {}, with_stored_key(b.get('apiKeys'), current_user()['u']))
+
+
+@runs_bp.route('/runs/<run_id>/approve', methods=['POST'])
+def approve(run_id):
+    """'Start building': optional edits {modules:[{key,title,description,removed}], contract, summary}."""
+    b = request.get_json(silent=True) or {}
+    return _resume(engine.approve_plan, run_id, b.get('edits') or {}, with_stored_key(b.get('apiKeys'), current_user()['u']))
+
+
+@runs_bp.route('/runs/<run_id>/replan', methods=['POST'])
+def replan(run_id):
+    """Ask the planner to revise the waiting plan with feedback."""
+    b = request.get_json(silent=True) or {}
+    return _resume(engine.revise_plan, run_id, b.get('feedback') or '', with_stored_key(b.get('apiKeys'), current_user()['u']))
+
+
+@runs_bp.route('/runs/<run_id>/reject', methods=['POST'])
+def reject(run_id):
+    return _resume(engine.reject_plan, run_id)
+
+
+@runs_bp.route('/runs/<run_id>/screenshot', methods=['GET'])
+def screenshot(run_id):
+    """The browser-check screenshot of the finished site."""
+    import os
+    from flask import send_file
+    from orchestrator.worker import SHOT_DIR
+    run, err = _get(run_id)
+    if err:
+        return err
+    path = os.path.join(SHOT_DIR, f'{run_id}.png')
+    if not os.path.isfile(path):
+        return jsonify({'error': 'no screenshot'}), 404
+    return send_file(path, mimetype='image/png', max_age=0)
+
+
+PREVIEW_TYPES = {'.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
+                 '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
+                 '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg',
+                 '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon',
+                 '.txt': 'text/plain; charset=utf-8', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+                 '.map': 'application/json', '.xml': 'application/xml', '.csv': 'text/csv'}
+
+
+@runs_bp.route('/runs/<run_id>/preview-token', methods=['POST'])
+def preview_token(run_id):
+    """Start a live preview of the finished static site. Returns a URL path (15-minute, read-only token)."""
+    from orchestrator import verify
+    run, err = _get(run_id)
+    if err:
+        return err
+    if not verify._static_dir(run.target_path):
+        return jsonify({'error': 'There is no web page to preview here (no index.html). Python apps can be run from "Run the result".'}), 404
+    u = current_user()
+    return jsonify({'url': f'/api/preview/{make_preview_token(u["u"], u["r"], run_id)}/{run_id}/'})
+
+
+@runs_bp.route('/preview/<token>/<run_id>/', defaults={'rel': ''})
+@runs_bp.route('/preview/<token>/<run_id>/<path:rel>')
+def preview(token, run_id, rel):
+    """Serve the finished site's static files, sandboxed. Never executes server code, only whitelisted file types."""
+    import os
+    from flask import send_file
+    from orchestrator import verify, sandbox
+    run, err = _get(run_id)
+    if err:
+        return err
+    site = verify._static_dir(run.target_path)
+    if not site:
+        return jsonify({'error': 'no web page'}), 404
+    rel = (rel or 'index.html')
+    if rel.endswith('/'):
+        rel += 'index.html'
+    ext = os.path.splitext(rel)[1].lower()
+    if ext not in PREVIEW_TYPES:
+        return jsonify({'error': 'file type not served'}), 403
+    try:
+        path = sandbox.safe_join(site, rel)
+    except sandbox.SandboxError:
+        return jsonify({'error': 'not found'}), 404
+    if not os.path.isfile(path):
+        return jsonify({'error': 'not found'}), 404
+    resp = send_file(path, mimetype=PREVIEW_TYPES[ext], max_age=0)
+    # even if someone opens the URL directly, the page runs in an opaque origin and cannot reach Adion
+    resp.headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-forms allow-modals allow-popups'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp

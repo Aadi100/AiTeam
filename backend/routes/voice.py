@@ -10,11 +10,11 @@ voice_bp = Blueprint('voice', __name__)
 @voice_bp.route('/voice/transcribe', methods=['POST'])
 def transcribe():
     f = request.files.get('audio')
-    key = request.form.get('openaiKey') or os.getenv('OPENAI_API_KEY', '')
+    key = os.getenv('OPENAI_API_KEY', '')
     if not f:
         return jsonify({'error': 'audio file is required'}), 400
     if not key:
-        return jsonify({'error': 'Whisper needs an OpenAI key (Settings) or OPENAI_API_KEY on the server'}), 400
+        return jsonify({'error': "The Whisper fallback needs OPENAI_API_KEY in backend/.env (Chrome and Edge use the browser's own speech recognition and need no key)"}), 400
     r = requests.post('https://api.openai.com/v1/audio/transcriptions',
                       headers={'Authorization': f'Bearer {key}'},
                       files={'file': (f.filename or 'audio.webm', f.stream, f.mimetype or 'audio/webm')},

@@ -1,5 +1,5 @@
 """Long-term memory injected into the planner prompt. Semantic (embedding) recall when an embedding
-model is reachable (Ollama `nomic-embed-text` by default, or OpenAI); keyword overlap otherwise."""
+model is configured (none by default); keyword overlap otherwise."""
 
 import os
 import re
@@ -18,33 +18,9 @@ def _words(text):
     return {w for w in re.findall(r'[a-z0-9]{3,}', (text or '').lower()) if w not in _STOP}
 
 
-_embed_state = {'ok': None, 'checked': 0.0}
-
-
 def embed(text):
-    """Embedding vector from Ollama (EMBED_MODEL, default nomic-embed-text) or OpenAI; None if unavailable."""
-    text = (text or '')[:4000]
-    if _embed_state['ok'] is False and time.time() - _embed_state['checked'] < 120:
-        return None
-    try:
-        url = os.getenv('OLLAMA_URL', 'http://localhost:11434').rstrip('/')
-        r = requests.post(f'{url}/api/embeddings', json={'model': os.getenv('EMBED_MODEL', 'nomic-embed-text'), 'prompt': text}, timeout=20)
-        if r.status_code == 200 and r.json().get('embedding'):
-            _embed_state['ok'] = True
-            return r.json()['embedding']
-    except requests.exceptions.RequestException:
-        pass
-    key = os.getenv('OPENAI_API_KEY', '')
-    if key:
-        try:
-            r = requests.post('https://api.openai.com/v1/embeddings', headers={'Authorization': f'Bearer {key}'},
-                              json={'model': 'text-embedding-3-small', 'input': text}, timeout=20)
-            if r.status_code == 200:
-                _embed_state['ok'] = True
-                return r.json()['data'][0]['embedding']
-        except requests.exceptions.RequestException:
-            pass
-    _embed_state.update(ok=False, checked=time.time())
+    """DeepSeek has no embeddings API and Adion uses no local models, so recall is keyword-based.
+    Returning None makes every caller fall back to word overlap."""
     return None
 
 

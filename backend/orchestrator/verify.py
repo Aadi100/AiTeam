@@ -77,31 +77,48 @@ def _wait_port(port, proc, timeout=12):
     return False
 
 
-def smoke_test(root):
-    """
-    Start the project's Python entry (PORT/FLASK_RUN_PORT set) and GET /.
-    Returns (ok: bool, report: str). Report holds the error text for an LLM to fix.
-    """
+def start_python(root):
+    """Start the project's Python entry on a free port. Returns ((proc, port, dir, name), '') or (None, report)."""
     entries = _find(root, PY_ENTRIES)
     if not entries:
-        return True, 'No Python entry point found; nothing to execute.'
+        return None, ''
     path = entries[0]
     d, name = os.path.dirname(path), os.path.basename(path)
-    # make Flask apps that hard-code a port still bind to ours: pass PORT and patch via env where possible
     port = _free_port()
     # never hand the server's secrets (API keys, passwords, tokens) to generated code
     safe = {k: v for k, v in os.environ.items() if not re.search(r'KEY|TOKEN|SECRET|PASSWORD|MONGO', k, re.I)}
     env = {**safe, 'PORT': str(port), 'FLASK_RUN_PORT': str(port), 'PYTHONUNBUFFERED': '1', 'FLASK_DEBUG': '0'}
     flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
-    proc = subprocess.Popen([sys.executable, '-B', '-c',
-                             _RUNNER, name, str(port)], cwd=d, env=env, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', creationflags=flags)
+    proc = subprocess.Popen([sys.executable, '-B', '-c', _RUNNER, name, str(port)], cwd=d, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+                            errors='replace', creationflags=flags)
+    if not _wait_port(port, proc):
+        out = (proc.stdout.read() or '')[-1800:] if proc.poll() is not None else ''
+        stop_proc(proc)
+        return None, f'`python {name}` (in {os.path.relpath(d, root)}) did not start listening.\n{out}'
+    return (proc, port, d, name), ''
+
+
+def stop_proc(proc):
     try:
-        if not _wait_port(port, proc):
-            out = ''
-            if proc.poll() is not None:
-                out = (proc.stdout.read() or '')[-1800:]
-            return False, f'`python {name}` (in {os.path.relpath(d, root)}) did not start listening.\n{out}'
+        if sys.platform == 'win32':
+            subprocess.run(['taskkill', '/T', '/F', '/PID', str(proc.pid)], capture_output=True)
+        else:
+            proc.kill()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def smoke_test(root):
+    """
+    Start the project's Python entry (PORT/FLASK_RUN_PORT set) and GET /.
+    Returns (ok: bool, report: str). Report holds the error text for an LLM to fix.
+    """
+    started, report = start_python(root)
+    if started is None:
+        return (False, report) if report else (True, 'No Python entry point found; nothing to execute.')
+    proc, port, d, name = started
+    try:
         try:
             r = urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=8)
             return True, f'GET / -> HTTP {r.status}'
@@ -112,10 +129,44 @@ def smoke_test(root):
         except Exception as e:  # noqa: BLE001
             return False, f'GET / failed: {e}'
     finally:
-        if sys.platform == 'win32':
-            subprocess.run(['taskkill', '/T', '/F', '/PID', str(proc.pid)], capture_output=True)
-        else:
-            proc.kill()
+        stop_proc(proc)
+
+
+def _static_dir(root):
+    hits = _find(root, ('index.html',))
+    return os.path.dirname(hits[0]) if hits else None
+
+
+def full_check(root, shot_path=None):
+    """Start the finished project (Python app, or a static server for plain HTML) and test it in a real browser.
+    Returns (ok, report, data). Opt-in per run because it executes the generated code."""
+    from . import browser_check
+    started, report = start_python(root)
+    if started is None and report:
+        return False, report, {'ok': False, 'issues': [{'level': 'error', 'msg': report[:300]}]}
+    if started is not None:
+        proc, port, d, name = started
+        try:
+            return browser_check.check(f'http://127.0.0.1:{port}/', shot_path)
+        finally:
+            stop_proc(proc)
+    site = _static_dir(root)
+    if not site:
+        return True, 'Nothing to open in a browser (no Python entry point and no index.html).', {'skipped': True}
+    import threading
+    from functools import partial
+    from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+
+    class Quiet(SimpleHTTPRequestHandler):
+        def log_message(self, *a, **k):
+            pass
+    srv = ThreadingHTTPServer(('127.0.0.1', 0), partial(Quiet, directory=site))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        return browser_check.check(f'http://127.0.0.1:{srv.server_address[1]}/', shot_path)
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 # Runs the entry file as __main__, but forces any app.run(...) call to our port and disables the reloader.
@@ -137,6 +188,9 @@ runpy.run_path(name, run_name="__main__")
 def project_files_for_fix(root, report, limit_chars=14000):
     """Collect likely-relevant source files (entry files first) to show the fixer."""
     paths = _find(root, PY_ENTRIES) + _find(root, ('index.html',))
+    named = set(re.findall(r'([\w./-]+\.(?:js|css|html|py))', report or ''))
+    if named:
+        paths += _find(root, {os.path.basename(n) for n in named})
     seen, parts, total = set(), [], 0
     for p in paths:
         rel = os.path.relpath(p, root).replace('\\', '/')

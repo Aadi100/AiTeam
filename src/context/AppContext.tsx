@@ -4,18 +4,16 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { api, ApiError, getToken, setToken, streamUrl, type Run, type Snapshot, type User } from '@/lib/api';
 
 export interface Settings {
-  gemini: string; claude: string; openai: string; ollamaUrl: string;
-  targetPath: string; plannerModel: string; workerModel: string; maxTokens: number; autoRun: boolean; verify: boolean;
+  targetPath: string; plannerModel: string; workerModel: string; maxTokens: number; autoRun: boolean; verify: boolean; webSearch: boolean; reviewPlan: boolean; deepPlan: boolean; v: number;
 }
 
 const DEFAULTS: Settings = {
-  gemini: '', claude: '', openai: '', ollamaUrl: 'http://localhost:11434',
-  targetPath: '~/Desktop/devsquad-output', plannerModel: 'claude-sonnet-5-5', workerModel: 'gemini-2.5-flash',
-  maxTokens: 0, autoRun: false, verify: false,
+  targetPath: '~/Desktop/adion-output', plannerModel: 'deepseek-chat', workerModel: 'deepseek-chat',
+  maxTokens: 150000, autoRun: false, verify: true, webSearch: false, reviewPlan: true, deepPlan: true, v: 2,
 };
 const SETTINGS_KEY = 'devsquad.settings.v2';
 
-export type Panel = 'runs' | 'jobs' | 'schedules' | 'memory' | 'users';
+export type Panel = 'runs' | 'jobs' | 'schedules' | 'memory' | 'usage' | 'pc' | 'users';
 
 interface Ctx {
   authed: boolean | null;
@@ -23,12 +21,19 @@ interface Ctx {
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   settings: Settings;
+  pcTaskId: string; setPcTaskId: (id: string) => void; pcVersion: number; refreshPc: () => void;
+  continueFrom: string; setContinueFrom: (id: string) => void;
+  answerQuestions: (answers: Record<string, string>) => Promise<void>;
+  approvePlan: (edits: { modules: { key: string; title: string; description: string; removed: boolean }[]; contract?: string }) => Promise<void>;
+  revisePlan: (feedback: string) => Promise<void>;
+  rejectPlan: () => Promise<void>;
   updateSettings: (p: Partial<Settings>) => void;
   settingsOpen: boolean; setSettingsOpen: (v: boolean) => void;
   panel: Panel; setPanel: (p: Panel) => void;
   snap: Snapshot | null;
   runs: Run[];
   refreshRuns: () => Promise<void>;
+  goal: string; setGoal: (g: string) => void;
   startRun: (goal: string, source?: string) => Promise<void>;
   openRun: (id: string) => void;
   cancelRun: () => Promise<void>;
@@ -51,10 +56,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [continueFrom, setContinueFrom] = useState('');
+  const [pcTaskId, setPcTaskId] = useState('');
+  const [pcVersion, setPcVersion] = useState(0);
+  const refreshPc = useCallback(() => setPcVersion(v => v + 1), []);
   const [panel, setPanel] = useState<Panel>('runs');
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [starting, setStarting] = useState(false);
+  const [goal, setGoal] = useState('');
   const [error, setError] = useState('');
   const [selectedTaskId, selectTask] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
@@ -64,8 +74,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- data loading: state is set from async results
-      if (raw) setSettings({ ...DEFAULTS, ...JSON.parse(raw) });
+      if (raw) {
+        const saved = JSON.parse(raw);
+        const ds = (m: unknown) => (typeof m === 'string' && m.startsWith('deepseek') ? m : 'deepseek-chat');
+        const clean = { ...DEFAULTS, ...saved, plannerModel: ds(saved.plannerModel), workerModel: ds(saved.workerModel) };
+        if (!saved.v || saved.v < 2) { clean.verify = true; clean.reviewPlan = true; clean.v = 2; }   // the agentic upgrade turns these on once
+        // drop any API keys older versions left in this browser
+        for (const k of ['gemini', 'claude', 'openai', 'ollamaUrl', 'deepseek']) delete (clean as Record<string, unknown>)[k];
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(clean));
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- data loading: state is set from persisted storage
+        setSettings(clean);
+      }
     } catch { /* ignore */ }
   }, []);
 
@@ -139,16 +158,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const run = await api<Run>('/runs', {
         method: 'POST',
         json: {
-          goal, targetPath: settings.targetPath, source, verify: settings.verify,
+          goal, targetPath: settings.targetPath, source, verify: settings.verify, webSearch: settings.webSearch,
+          reviewPlan: settings.reviewPlan, deepPlan: settings.deepPlan, continueRunId: continueFrom || undefined,
           plannerModel: settings.plannerModel, workerModel: settings.workerModel, maxTokens: settings.maxTokens,
-          apiKeys: { gemini: settings.gemini, claude: settings.claude, openai: settings.openai, ollamaUrl: settings.ollamaUrl },
         },
       });
       setPanel('runs');
+      setContinueFrom('');
       watch(run.id);
       refreshRuns();
     } catch (e) { handleErr(e); } finally { setStarting(false); }
-  }, [settings, watch, refreshRuns, handleErr]);
+  }, [settings, continueFrom, watch, refreshRuns, handleErr]);
 
   const cancelRun = useCallback(async () => {
     if (!snap) return;
@@ -160,15 +180,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       await api(`/runs/${snap.run.id}/tasks/${taskId}/retry`, {
         method: 'POST',
-        json: { apiKeys: { gemini: settings.gemini, claude: settings.claude, openai: settings.openai, ollamaUrl: settings.ollamaUrl } },
       });
       watch(snap.run.id);
     } catch (e) { handleErr(e); }
-  }, [snap, settings, watch, handleErr]);
+  }, [snap, watch, handleErr]);
+
+  // resume a paused run: the server returns the fresh snapshot; keep watching it
+  const resume = useCallback(async (path: string, json: unknown) => {
+    if (!snap) return;
+    try {
+      const s = await api<Snapshot>(`/runs/${snap.run.id}/${path}`, { method: 'POST', json });
+      setSnap(s);
+      watch(snap.run.id);
+      refreshRuns();
+    } catch (e) { handleErr(e); }
+  }, [snap, watch, refreshRuns, handleErr]);
+  const answerQuestions = useCallback((answers: Record<string, string>) => resume('answers', { answers }), [resume]);
+  const approvePlan = useCallback((edits: { modules: { key: string; title: string; description: string; removed: boolean }[]; contract?: string }) => resume('approve', { edits }), [resume]);
+  const revisePlan = useCallback((feedback: string) => resume('replan', { feedback }), [resume]);
+  const rejectPlan = useCallback(() => resume('reject', {}), [resume]);
 
   return (
     <AppCtx.Provider value={{
-      authed, user, login, retryTask, logout, settings, updateSettings, settingsOpen, setSettingsOpen, panel, setPanel,
+      pcTaskId, setPcTaskId, pcVersion, refreshPc, continueFrom, setContinueFrom, answerQuestions, approvePlan, revisePlan, rejectPlan,
+      authed, user, login, retryTask, goal, setGoal, logout, settings, updateSettings, settingsOpen, setSettingsOpen, panel, setPanel,
       snap, runs, refreshRuns, startRun, openRun: watch, cancelRun, starting, error,
       clearError: () => setError(''), selectedTaskId, selectTask,
     }}>

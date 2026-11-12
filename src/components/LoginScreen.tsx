@@ -26,8 +26,8 @@ export default function LoginScreen() {
             <Lock className="h-5 w-5 text-cyan-300" />
           </div>
           <div>
-            <h1 className="text-base font-semibold">DevSquad Mission Control</h1>
-            <p className="text-xs text-slate-400">Sign in to run agents on this machine</p>
+            <h1 className="text-base font-semibold">Adion</h1>
+            <p className="text-xs text-slate-400">Sign in to meet your AI team</p>
           </div>
         </div>
         <input value={name} onChange={e => setName(e.target.value)} placeholder="Username" autoComplete="username"

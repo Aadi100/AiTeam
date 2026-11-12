@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DevSquad AI - Autonomous Multi-Agent Software Office",
-  description: "Accelerate coding with an autonomous multi-agent team: Lead Architect, Frontend Dev, Backend Engineer, QA Auditor, and DevOps.",
+  title: "Adion - your AI software team",
+  description: "Adion is a personal AI assistant that plans your project, spawns parallel agents to build it, and talks to you while it works.",
 };
 
 export default function RootLayout({

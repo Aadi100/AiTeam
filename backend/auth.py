@@ -57,6 +57,14 @@ def make_token(username, role):
     return f'{p}.{_sign(p)}'
 
 
+def make_preview_token(username, role, run_id):
+    """A 15-minute token that can ONLY read one run's static preview files. It is safe to put in a URL: it cannot
+    call the API, so generated page code that reads its own address gets nothing useful."""
+    payload = {'u': username, 'r': role, 'p': run_id, 'exp': int(time.time()) + 15 * 60}
+    p = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    return f'{p}.{_sign(p)}'
+
+
 def read_token(tok):
     """Return {'u','r'} for a valid token, else None."""
     try:
@@ -86,10 +94,18 @@ def require_auth():
     """Flask before_request hook: authenticate and enforce role rules."""
     if request.method == 'OPTIONS' or not request.path.startswith('/api') or request.path in OPEN_PATHS:
         return None
-    tok = request.headers.get('Authorization', '').removeprefix('Bearer ').strip() or request.args.get('token', '')
+    parts = request.path.split('/', 5)          # ['', 'api', 'preview', <token>, <run_id>, <file>]
+    preview = request.path.startswith('/api/preview/')
+    tok = (parts[3] if len(parts) > 3 else '') if preview else (
+        request.headers.get('Authorization', '').removeprefix('Bearer ').strip() or request.args.get('token', ''))
     user = read_token(tok)
     if not user:
         return jsonify({'error': 'unauthorized'}), 401
+    scope = user.get('p')                        # preview tokens work only for their own run's preview, and nothing else
+    if bool(scope) != preview or (preview and (len(parts) < 5 or parts[4] != scope)):
+        return jsonify({'error': 'unauthorized'}), 401
+    if preview and request.method != 'GET':
+        return jsonify({'error': 'read-only'}), 405
     # the account may have been deleted or demoted since the token was issued
     row = UserDocument.objects(username=user['u']).first()
     if not row:
@@ -100,7 +116,7 @@ def require_auth():
         return jsonify({'error': 'admin only'}), 403
     if request.path.startswith('/api/jobs') and role != 'admin':
         return jsonify({'error': 'background shell jobs are admin only'}), 403
-    if write and role == 'viewer' and request.path != '/api/auth/password':
+    if write and role == 'viewer' and request.path not in ('/api/auth/password', '/api/assistant/chat'):
         return jsonify({'error': 'viewers are read-only'}), 403
     return None
 
@@ -142,6 +158,82 @@ def change_password():
     if len(str(b.get('new', ''))) < 8:
         return jsonify({'error': 'new password must be at least 8 characters'}), 400
     row.update(set__password_hash=generate_password_hash(b['new']))
+    return jsonify({'ok': True})
+
+
+def stored_key(username):
+    """Decrypted DeepSeek key: the user's own, else the first admin's (a shared team key)."""
+    for row in [UserDocument.objects(username=username).first()] + list(UserDocument.objects(role='admin')):
+        if row and row.deepseek_enc:
+            k = decrypt_json(row.deepseek_enc).get('k', '')
+            if k:
+                return k
+    return ''
+
+
+def stored_search_key(username):
+    """Decrypted Tavily key: the user's own, else the first admin's, else TAVILY_API_KEY from the server env."""
+    for row in [UserDocument.objects(username=username).first()] + list(UserDocument.objects(role='admin')):
+        if row and row.tavily_enc:
+            k = decrypt_json(row.tavily_enc).get('k', '')
+            if k:
+                return k
+    return os.getenv('TAVILY_API_KEY', '').strip()
+
+
+def with_stored_key(keys, username):
+    """Fill in the DeepSeek key from the database when the caller did not supply one."""
+    keys = dict(keys or {})
+    if not keys.get('deepseek'):
+        keys['deepseek'] = stored_key(username)
+    if not keys.get('tavily'):
+        keys['tavily'] = stored_search_key(username)
+    return keys
+
+
+@auth_bp.route('/auth/apikey', methods=['GET'])
+def get_apikey():
+    row = UserDocument.objects(username=current_user()['u']).first()
+    k = decrypt_json(row.deepseek_enc).get('k', '') if row and row.deepseek_enc else ''
+    shared = bool(not k and stored_key(current_user()['u']))
+    return jsonify({'set': bool(k), 'hint': (k[:3] + '…' + k[-4:]) if len(k) > 8 else '', 'shared': shared})
+
+
+@auth_bp.route('/auth/apikey', methods=['PUT'])
+def put_apikey():
+    k = str((request.get_json(silent=True) or {}).get('key', '')).strip()
+    if len(k) < 16 or any(c.isspace() for c in k):
+        return jsonify({'error': 'that does not look like a DeepSeek API key (starts with sk-)'}), 400
+    UserDocument.objects(username=current_user()['u']).update_one(set__deepseek_enc=encrypt_json({'k': k}))
+    return jsonify({'ok': True, 'hint': k[:3] + '…' + k[-4:]})
+
+
+@auth_bp.route('/auth/apikey', methods=['DELETE'])
+def delete_apikey():
+    UserDocument.objects(username=current_user()['u']).update_one(set__deepseek_enc='')
+    return jsonify({'ok': True})
+
+
+@auth_bp.route('/auth/searchkey', methods=['GET'])
+def get_searchkey():
+    row = UserDocument.objects(username=current_user()['u']).first()
+    k = decrypt_json(row.tavily_enc).get('k', '') if row and row.tavily_enc else ''
+    shared = bool(not k and stored_search_key(current_user()['u']))
+    return jsonify({'set': bool(k), 'hint': (k[:5] + '…' + k[-4:]) if len(k) > 10 else '', 'shared': shared})
+
+
+@auth_bp.route('/auth/searchkey', methods=['PUT'])
+def put_searchkey():
+    k = str((request.get_json(silent=True) or {}).get('key', '')).strip()
+    if len(k) < 12 or any(c.isspace() for c in k):
+        return jsonify({'error': 'that does not look like a Tavily API key (starts with tvly-)'}), 400
+    UserDocument.objects(username=current_user()['u']).update_one(set__tavily_enc=encrypt_json({'k': k}))
+    return jsonify({'ok': True, 'hint': k[:5] + '…' + k[-4:]})
+
+
+@auth_bp.route('/auth/searchkey', methods=['DELETE'])
+def delete_searchkey():
+    UserDocument.objects(username=current_user()['u']).update_one(set__tavily_enc='')
     return jsonify({'ok': True})
 
 

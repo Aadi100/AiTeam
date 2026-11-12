@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { X, FileText } from 'lucide-react';
+import { X, FileText, Volume2 } from 'lucide-react';
+import { useVoice } from '@/context/VoiceContext';
 import { useApp } from '@/context/AppContext';
 import { api, fmtTokens, type AgentTask } from '@/lib/api';
 
@@ -16,6 +17,7 @@ export default function TaskDrawer() {
 
 function DrawerBody() {
   const { snap, selectedTaskId, selectTask, retryTask } = useApp();
+  const { speakText } = useVoice();
   const [detail, setDetail] = useState<AgentTask | null>(null);
   const [file, setFile] = useState<{ path: string; content: string } | null>(null);
   const summary = snap?.tasks.find(t => t.id === selectedTaskId);
@@ -53,6 +55,8 @@ function DrawerBody() {
       <div className="flex-1 overflow-y-auto p-4 space-y-5 text-sm">
         {summary.description && <p className="text-xs text-slate-400 leading-relaxed">{summary.description}</p>}
         {summary.summary && <p className="text-xs text-emerald-300/90">{summary.summary}</p>}
+        <button onClick={() => speakText(`${summary.title}. Status ${summary.status}. ${summary.summary || ''} ${summary.error || ''}`)}
+          className="flex items-center gap-1.5 text-xs text-cyan-300 hover:text-cyan-200"><Volume2 className="h-3.5 w-3.5" /> Ask Adion to read this</button>
         {summary.error && <p className="text-xs text-rose-300 break-words">{summary.error}</p>}
         {['failed', 'skipped', 'cancelled'].includes(summary.status) &&
           !['planning', 'running'].includes(snap.run.status) && (
@@ -76,7 +80,7 @@ function DrawerBody() {
           {file && (
             <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900">
               <div className="flex justify-between px-3 py-1.5 border-b border-slate-800 text-[11px] text-slate-400 font-mono">
-                {file.path}<button onClick={() => setFile(null)}>close</button>
+                {file.path}<span className="flex gap-3"><button onClick={() => speakText(file.content.slice(0, 2500))} title="Read aloud">read aloud</button><button onClick={() => setFile(null)}>close</button></span>
               </div>
               <pre className="p-3 text-[11px] leading-relaxed overflow-auto max-h-80 text-slate-200 font-mono whitespace-pre">{file.content}</pre>
             </div>

@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { History, Terminal, CalendarClock, Brain, Trash2, RotateCw, Square, Plus, Users } from 'lucide-react';
+import { History, Terminal, CalendarClock, Brain, Trash2, RotateCw, Square, Plus, Users, Coins, Laptop } from 'lucide-react';
+import UsagePanel from '@/components/UsagePanel';
+import PcPanel from '@/components/PcPanel';
 import { useApp, type Panel } from '@/context/AppContext';
 import { api, fmtTokens, type Job, type MemoryItem, type Role, type Run, type Schedule, type User } from '@/lib/api';
 
@@ -10,13 +12,15 @@ const TABS: { id: Panel; label: string; icon: React.ReactNode; admin?: boolean }
   { id: 'jobs', label: 'Background', icon: <Terminal className="h-3.5 w-3.5" />, admin: true },
   { id: 'schedules', label: 'Schedules', icon: <CalendarClock className="h-3.5 w-3.5" /> },
   { id: 'memory', label: 'Memory', icon: <Brain className="h-3.5 w-3.5" /> },
+  { id: 'pc', label: 'PC', icon: <Laptop className="h-3.5 w-3.5" />, admin: true },
+  { id: 'usage', label: 'Usage', icon: <Coins className="h-3.5 w-3.5" /> },
   { id: 'users', label: 'Users', icon: <Users className="h-3.5 w-3.5" />, admin: true },
 ];
 
 const inputCls = 'w-full rounded-md bg-slate-950 border border-slate-700 px-2 py-1.5 text-xs outline-none focus:border-cyan-500';
 const btnCls = 'rounded-md bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 px-2.5 py-1.5 text-xs font-medium flex items-center gap-1';
 const STATUS_COLOR: Record<string, string> = {
-  completed: 'text-emerald-400', running: 'text-sky-400', planning: 'text-violet-400', exited: 'text-emerald-400',
+  completed: 'text-emerald-400', running: 'text-sky-400', planning: 'text-violet-400', awaiting_input: 'text-amber-400', awaiting_approval: 'text-amber-400', exited: 'text-emerald-400',
   failed: 'text-rose-400', cancelled: 'text-slate-400', stopped: 'text-amber-400', lost: 'text-slate-500',
 };
 
@@ -32,7 +36,7 @@ function RunsList() {
             className={`w-full text-left rounded-lg border px-2.5 py-2 ${snap?.run.id === r.id ? 'border-cyan-500 bg-slate-800' : 'border-slate-800 hover:bg-slate-800/60'}`}>
             <div className="text-xs truncate">{r.projectName || r.goal}</div>
             <div className="text-[11px] font-mono text-slate-500">
-              <span className={STATUS_COLOR[r.status]}>{r.status}</span> · {fmtTokens(r.tokens)} tokens
+              <span className={STATUS_COLOR[r.status]}>{r.status.replace('_', ' ')}</span> · {fmtTokens(r.tokens)} tokens
               {r.source !== 'manual' && ` · ${r.source}`}
             </div>
           </button>
@@ -102,7 +106,6 @@ function SchedulesPanel() {
   const { settings } = useApp();
   const [items, setItems] = useState<Schedule[]>([]);
   const [f, setF] = useState({ name: '', goal: '', everyMinutes: 0, dailyAt: '' });
-  const [storeKeys, setStoreKeys] = useState(false);
   const [err, setErr] = useState('');
   const load = useCallback(async () => { try { setItems(await api<Schedule[]>('/schedules')); } catch { /* ignore */ } }, []);
   useEffect(() => {
@@ -120,12 +123,8 @@ function SchedulesPanel() {
           <input className={inputCls} type="number" min={0} placeholder="every N min" value={f.everyMinutes || ''} onChange={e => setF({ ...f, everyMinutes: Number(e.target.value) || 0, dailyAt: '' })} />
           <input className={inputCls} type="time" value={f.dailyAt} onChange={e => setF({ ...f, dailyAt: e.target.value, everyMinutes: 0 })} />
         </div>
-        <label className="flex items-start gap-2 text-[11px] text-slate-300 cursor-pointer">
-          <input type="checkbox" className="mt-0.5" checked={storeKeys} onChange={e => setStoreKeys(e.target.checked)} />
-          <span>Store my API keys with this schedule, encrypted on the server. Otherwise unattended runs use server env keys or local Ollama.</span>
-        </label>
         <button className={btnCls} disabled={!f.goal.trim() || (!f.everyMinutes && !f.dailyAt)}
-          onClick={() => act(() => api('/schedules', { method: 'POST', json: { ...f, targetPath: settings.targetPath, plannerModel: settings.plannerModel, workerModel: settings.workerModel, maxTokens: settings.maxTokens, storeKeys, apiKeys: storeKeys ? { gemini: settings.gemini, claude: settings.claude, openai: settings.openai, ollamaUrl: settings.ollamaUrl } : undefined } }))}>
+          onClick={() => act(() => api('/schedules', { method: 'POST', json: { ...f, targetPath: settings.targetPath, plannerModel: settings.plannerModel, workerModel: settings.workerModel, maxTokens: settings.maxTokens } }))}>
           <Plus className="h-3 w-3" /> Add schedule</button>
         {err && <p className="text-[11px] text-rose-400">{err}</p>}
       </div>
@@ -233,20 +232,22 @@ export default function SidePanel() {
   const { panel, setPanel, user } = useApp();
   const tabs = TABS.filter(t => !t.admin || user?.role === 'admin');
   return (
-    <aside className="lg:w-80 shrink-0 rounded-2xl border border-slate-800 bg-slate-900/40 flex flex-col min-h-0">
-      <div className="flex border-b border-slate-800">
+    <aside className="lg:w-80 shrink-0 rounded-3xl border border-slate-800/80 bg-slate-900/40 flex flex-col min-h-[24rem] lg:sticky lg:top-[4.5rem] lg:h-[calc(100vh-6rem)] overflow-hidden">
+      <div className="grid border-b border-slate-800/80 bg-slate-950/30" style={{ gridTemplateColumns: `repeat(${tabs.length > 6 ? 4 : tabs.length > 4 ? 3 : tabs.length}, minmax(0, 1fr))` }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setPanel(t.id)} title={t.label}
-            className={`flex-1 py-2.5 flex items-center justify-center gap-1.5 text-[11px] ${panel === t.id ? 'text-cyan-300 border-b-2 border-cyan-500' : 'text-slate-400 hover:text-slate-200'}`}>
-            {t.icon}<span className="hidden xl:inline">{t.label}</span>
+            className={`py-2.5 flex flex-col items-center justify-center gap-1 text-[10px] transition ${panel === t.id ? 'text-cyan-300 bg-slate-900/70 shadow-[inset_0_-2px_0_0_rgb(6,182,212)]' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-900/40'}`}>
+            {t.icon}<span>{t.label}</span>
           </button>
         ))}
       </div>
-      <div className="p-3 overflow-y-auto flex-1 min-h-0">
+      <div className="p-4 overflow-y-auto flex-1 min-h-0">
         {panel === 'runs' && <RunsList />}
         {panel === 'jobs' && <JobsPanel />}
         {panel === 'schedules' && <SchedulesPanel />}
         {panel === 'memory' && <MemoryPanel />}
+        {panel === 'usage' && <UsagePanel />}
+        {panel === 'pc' && <PcPanel />}
         {panel === 'users' && <UsersPanel />}
       </div>
     </aside>

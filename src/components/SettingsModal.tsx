@@ -4,16 +4,10 @@ import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
-
-const FIELDS: { key: 'claude' | 'gemini' | 'openai' | 'ollamaUrl'; label: string; secret: boolean; hint: string }[] = [
-  { key: 'claude', label: 'Anthropic (Claude) API key', secret: true, hint: 'Used for claude-* models' },
-  { key: 'gemini', label: 'Google Gemini API key', secret: true, hint: 'Used for gemini-* models' },
-  { key: 'openai', label: 'OpenAI API key', secret: true, hint: 'Used for gpt-* models and Whisper voice fallback' },
-  { key: 'ollamaUrl', label: 'Ollama URL', secret: false, hint: 'Local models, e.g. ollama:llama3.2 (no key, fully offline)' },
-];
+import KeyField from '@/components/KeyField';
 
 export default function SettingsModal() {
-  const { settingsOpen, setSettingsOpen, settings, updateSettings, logout, user } = useApp();
+  const { settingsOpen, setSettingsOpen, logout, user } = useApp();
   const [pw, setPw] = useState({ current: '', next: '' });
   const [pwMsg, setPwMsg] = useState('');
   if (!settingsOpen) return null;
@@ -28,17 +22,14 @@ export default function SettingsModal() {
           <h2 className="text-sm font-semibold">Models &amp; keys</h2>
           <button onClick={() => setSettingsOpen(false)} className="text-slate-400 hover:text-white"><X className="h-4 w-4" /></button>
         </div>
-        {FIELDS.map(f => (
-          <label key={f.key} className="block text-xs space-y-1">
-            <span className="text-slate-300">{f.label}</span>
-            <input type={f.secret ? 'password' : 'text'} autoComplete="off" value={settings[f.key]}
-              onChange={e => updateSettings({ [f.key]: e.target.value })}
-              className="w-full rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-2 outline-none focus:border-cyan-500 font-mono" />
-            <span className="text-slate-500">{f.hint}</span>
-          </label>
-        ))}
+        <KeyField title="DeepSeek API key" endpoint="/auth/apikey" placeholder="sk-..." minLen={16} active={settingsOpen}
+          missing="No key yet. Adion cannot build or chat until you add one."
+          help={<>Get one at platform.deepseek.com, then API keys.</>} />
+        <KeyField title="Tavily API key (web search, optional)" endpoint="/auth/searchkey" placeholder="tvly-..." minLen={12} active={settingsOpen}
+          missing="No key yet. Adion will answer from its built-in knowledge only."
+          help={<>Get a free one at tavily.com. Used only for questions about recent or changing facts.</>} />
         <p className="text-[11px] text-slate-500 leading-relaxed">
-          Keys stay in this browser and are sent only with a run request. They are held in server memory for that run and never written to the database. You can also set GEMINI_API_KEY, CLAUDE_API_KEY or OPENAI_API_KEY in backend/.env.
+          Keys are encrypted and stored in the database on the server. They are never kept in this browser or shown again after saving. You can also set DEEPSEEK_API_KEY and TAVILY_API_KEY in backend/.env.
         </p>
         <div className="border-t border-slate-800 pt-3 space-y-1.5">
           <p className="text-xs text-slate-300">Signed in as <b>{user?.username}</b> ({user?.role}) · change password</p>

@@ -1,274 +1,9 @@
 """
-DevSquad MongoEngine Data Models
-High-performance document schemas for autonomous agent nodes, multi-task threads,
-custom model weights/configs, continuous training pairs, and telemetry.
+Adion MongoEngine data models: runs, agent tasks, the usage ledger, memory, schedules, background jobs and users.
 """
 
 import mongoengine as me
 from datetime import datetime
-
-
-class AgentDocument(me.Document):
-    agent_id = me.StringField(unique=True, required=True)
-    name = me.StringField(required=True)
-    role = me.StringField(required=True)
-    department = me.StringField(default='Custom')
-    avatar = me.StringField(default='🤖')
-    color = me.StringField(default='from-cyan-600 to-indigo-700')
-    status = me.StringField(default='idle')
-    status_text = me.StringField(default='Ready for directives')
-    current_task_id = me.StringField()
-    model = me.StringField(default='gemini-2.0-flash')
-    system_prompt = me.StringField(default='You are an autonomous specialized AI execution worker node.')
-    skills = me.ListField(me.StringField(), default=list)
-    stats = me.DictField(default=lambda: {'tasksDone': 0, 'filesCreated': 0, 'reviewsDone': 0})
-    logs = me.ListField(me.DictField(), default=list)
-    desk = me.DictField(default=lambda: {'room': 'Compute Pod', 'col': 1, 'row': 1})
-    created_at = me.DateTimeField(default=datetime.utcnow)
-
-    meta = {
-        'collection': 'agents',
-        'indexes': ['agent_id', 'status', 'department']
-    }
-
-    def to_dict(self):
-        return {
-            'id': self.agent_id,
-            'name': self.name,
-            'role': self.role,
-            'department': self.department,
-            'avatar': self.avatar,
-            'color': self.color,
-            'status': self.status,
-            'statusText': self.status_text,
-            'currentTaskId': self.current_task_id,
-            'model': self.model,
-            'systemPrompt': self.system_prompt,
-            'skills': self.skills,
-            'stats': self.stats,
-            'logs': self.logs,
-            'desk': self.desk
-        }
-
-
-class TaskDocument(me.Document):
-    task_id = me.StringField(unique=True, required=True)
-    title = me.StringField(required=True)
-    description = me.StringField(default='')
-    assignee_id = me.StringField(required=True)
-    priority = me.StringField(default='medium')  # 'low' | 'medium' | 'high' | 'critical'
-    status = me.StringField(default='in_progress')  # 'backlog' | 'in_progress' | 'review' | 'done'
-    progress = me.IntField(default=0)
-    deliverables = me.ListField(me.StringField(), default=list)
-    created_at = me.StringField(default='Just now')
-    completed_at = me.StringField()
-    timestamp = me.DateTimeField(default=datetime.utcnow)
-
-    meta = {
-        'collection': 'tasks',
-        'indexes': ['task_id', 'assignee_id', 'status']
-    }
-
-    def to_dict(self):
-        return {
-            'id': self.task_id,
-            'title': self.title,
-            'description': self.description,
-            'assigneeId': self.assignee_id,
-            'priority': self.priority,
-            'status': self.status,
-            'progress': self.progress,
-            'deliverables': self.deliverables,
-            'createdAt': self.created_at,
-            'completedAt': self.completed_at
-        }
-
-
-class TrainingPairDocument(me.Document):
-    pair_id = me.StringField(unique=True, required=True)
-    agent_id = me.StringField(default='cluster')
-    agent_name = me.StringField(default='Cluster Core')
-    prompt = me.StringField(required=True)
-    response = me.StringField(required=True)
-    corrected_response = me.StringField(default='')
-    rating = me.StringField(default='golden')  # 'positive' | 'negative' | 'golden'
-    tags = me.ListField(me.StringField(), default=list)
-    created_at = me.StringField(default='Just now')
-    used_in_training = me.BooleanField(default=False)
-    timestamp = me.DateTimeField(default=datetime.utcnow)
-
-    meta = {
-        'collection': 'training_pairs',
-        'indexes': ['pair_id', 'agent_id', 'rating', 'used_in_training']
-    }
-
-    def to_dict(self):
-        return {
-            'id': self.pair_id,
-            'agentId': self.agent_id,
-            'agentName': self.agent_name,
-            'prompt': self.prompt,
-            'response': self.response,
-            'correctedResponse': self.corrected_response,
-            'rating': self.rating,
-            'tags': self.tags,
-            'createdAt': self.created_at,
-            'usedInTraining': self.used_in_training
-        }
-
-
-class CustomModelDocument(me.Document):
-    model_id = me.StringField(unique=True, required=True)
-    name = me.StringField(required=True)
-    base_model = me.StringField(required=True)
-    specialization = me.StringField(default='General')
-    target_agent_id = me.StringField(default='')
-    epochs = me.IntField(default=3)
-    learning_rate = me.FloatField(default=0.0002)
-    training_pairs_count = me.IntField(default=0)
-    status = me.StringField(default='ready')  # 'draft' | 'training' | 'ready'
-    accuracy = me.FloatField(default=98.4)
-    loss = me.FloatField(default=0.28)
-    created_at = me.StringField(default='Just now')
-    modelfile_content = me.StringField(default='')
-    timestamp = me.DateTimeField(default=datetime.utcnow)
-
-    meta = {
-        'collection': 'custom_models',
-        'indexes': ['model_id', 'name', 'status']
-    }
-
-    def to_dict(self):
-        return {
-            'id': self.model_id,
-            'name': self.name,
-            'baseModel': self.base_model,
-            'specialization': self.specialization,
-            'targetAgentId': self.target_agent_id,
-            'epochs': self.epochs,
-            'learningRate': self.learning_rate,
-            'trainingPairsCount': self.training_pairs_count,
-            'status': self.status,
-            'accuracy': self.accuracy,
-            'loss': self.loss,
-            'createdAt': self.created_at,
-            'modelfileContent': self.modelfile_content
-        }
-
-
-class MessageDocument(me.Document):
-    msg_id = me.StringField(unique=True, required=True)
-    sender_id = me.StringField(required=True)
-    sender_name = me.StringField(required=True)
-    sender_role = me.StringField(required=True)
-    sender_avatar = me.StringField(default='⚡')
-    channel_id = me.StringField(default='general')
-    text = me.StringField(required=True)
-    timestamp = me.StringField(default='Just now')
-    code_snippet = me.DictField()
-    created_at = me.DateTimeField(default=datetime.utcnow)
-
-    meta = {
-        'collection': 'messages',
-        'indexes': ['msg_id', 'channel_id', 'created_at']
-    }
-
-    def to_dict(self):
-        d = {
-            'id': self.msg_id,
-            'senderId': self.sender_id,
-            'senderName': self.sender_name,
-            'senderRole': self.sender_role,
-            'senderAvatar': self.sender_avatar,
-            'channelId': self.channel_id,
-            'text': self.text,
-            'timestamp': self.timestamp
-        }
-        if self.code_snippet:
-            d['codeSnippet'] = self.code_snippet
-        return d
-
-
-class ProjectStateDocument(me.Document):
-    singleton_id = me.StringField(unique=True, default='current_project')
-    project_name = me.StringField(default='Idle Workspace')
-    project_goal = me.StringField(default='Standing by for multi-task directive...')
-    status = me.StringField(default='idle')
-    progress = me.IntField(default=0)
-    started_at = me.StringField(default='')
-    updated_at = me.DateTimeField(default=datetime.utcnow)
-
-    meta = {
-        'collection': 'project_state'
-    }
-
-    def to_dict(self):
-        return {
-            'projectName': self.project_name,
-            'projectGoal': self.project_goal,
-            'status': self.status,
-            'progress': self.progress,
-            'startedAt': self.started_at
-        }
-
-
-class ResearchBriefDocument(me.Document):
-    brief_id = me.StringField(unique=True, required=True)
-    topic = me.StringField(required=True)
-    summary = me.StringField(required=True)
-    benchmarks = me.ListField(me.DictField(), default=list)
-    key_findings = me.ListField(me.StringField(), default=list)
-    recommendation = me.StringField(default='')
-    poc_code = me.DictField()
-    timestamp = me.StringField(default='Just now')
-
-    meta = {
-        'collection': 'research_briefs',
-        'indexes': ['brief_id', 'topic']
-    }
-
-    def to_dict(self):
-        return {
-            'id': self.brief_id,
-            'topic': self.topic,
-            'summary': self.summary,
-            'benchmarks': self.benchmarks,
-            'keyFindings': self.key_findings,
-            'recommendation': self.recommendation,
-            'pocCode': self.poc_code,
-            'timestamp': self.timestamp
-        }
-
-
-class ProjectHistoryDocument(me.Document):
-    history_id = me.StringField(unique=True, required=True)
-    prompt = me.StringField(required=True)
-    target_path = me.StringField(required=True)
-    timestamp = me.StringField(default='Just now')
-    total_files = me.IntField(default=0)
-    files = me.ListField(me.DictField(), default=list)
-    streams = me.DictField(default=dict)
-    models_used = me.DictField(default=dict)
-    created_at = me.DateTimeField(default=datetime.utcnow)
-
-    meta = {
-        'collection': 'project_history',
-        'ordering': ['-created_at'],
-        'indexes': ['history_id', 'created_at']
-    }
-
-    def to_dict(self):
-        return {
-            'id': self.history_id,
-            'prompt': self.prompt,
-            'targetPath': self.target_path,
-            'timestamp': self.timestamp,
-            'totalFiles': self.total_files,
-            'files': self.files,
-            'streams': self.streams,
-            'modelsUsed': self.models_used,
-            'createdAt': self.created_at.isoformat() if self.created_at else ''
-        }
 
 
 # ───────────────────────── Orchestrator (agent map) ─────────────────────────
@@ -279,6 +14,21 @@ class RunDocument(me.Document):
     goal = me.StringField(required=True)
     project_name = me.StringField(default='')
     summary = me.StringField(default='')
+    answer = me.StringField(default='')            # set when the goal was a question, not a build
+    sources = me.ListField(me.DictField(), default=list)   # web sources behind an answer [{title, url}]
+    web_search = me.BooleanField(default=False)    # always search the web for this question
+    kind = me.StringField(default='')              # routing decision: chat|small|large|edit
+    mode = me.StringField(default='build')         # build | edit (a follow-up change to an existing project)
+    parent_run_id = me.StringField(default='')     # the run an edit continues
+    review_plan = me.BooleanField(default=False)   # pause for the user's approval before building
+    deep_plan = me.BooleanField(default=True)      # plan big projects with the slower, smarter reasoner model
+    reused_plan = me.StringField(default='')       # name of an earlier good plan this one was modelled on
+    pc_task_id = me.StringField(default='')        # a PC-control request started from the composer
+    questions = me.ListField(me.DictField(), default=list)  # [{id, q, options, answer, taskId}] asked of the user
+    plan = me.DictField(default=dict)              # plan waiting for approval
+    assumptions = me.ListField(me.StringField(), default=list)
+    revisions = me.IntField(default=0)             # how many times the planner re-planned after failures
+    check = me.DictField(default=dict)             # last browser check {ok, url, issues[], screenshot, ...}
     contract = me.StringField(default='')          # shared interface notes given to every worker
     target_path = me.StringField(required=True)
     status = me.StringField(default='planning')    # planning|running|completed|failed|cancelled
@@ -287,6 +37,10 @@ class RunDocument(me.Document):
     max_tokens = me.IntField(default=0)            # 0 = unlimited budget
     tokens_in = me.IntField(default=0)
     tokens_out = me.IntField(default=0)
+    cache_hit = me.IntField(default=0)             # input tokens served from DeepSeek's cache (billed ~10x cheaper)
+    cost_usd = me.FloatField(default=0.0)
+    estimate_tokens = me.IntField(default=0)       # forecast made right after planning
+    estimate_cost = me.FloatField(default=0.0)
     cancel_requested = me.BooleanField(default=False)
     error = me.StringField(default='')
     source = me.StringField(default='manual')      # manual|voice|schedule
@@ -302,15 +56,115 @@ class RunDocument(me.Document):
     def to_dict(self):
         return {
             'id': self.run_id, 'goal': self.goal, 'projectName': self.project_name,
-            'summary': self.summary, 'targetPath': self.target_path, 'status': self.status,
+            'summary': self.summary, 'answer': self.answer, 'sources': self.sources,
+            'kind': self.kind, 'mode': self.mode, 'parentRunId': self.parent_run_id, 'reviewPlan': self.review_plan,
+            'questions': self.questions, 'plan': self.plan, 'assumptions': self.assumptions,
+            'deepPlan': self.deep_plan, 'reusedPlan': self.reused_plan, 'pcTaskId': self.pc_task_id,
+            'revisions': self.revisions, 'check': self.check, 'targetPath': self.target_path, 'status': self.status,
             'plannerModel': self.planner_model, 'workerModel': self.worker_model,
             'maxTokens': self.max_tokens, 'tokensIn': self.tokens_in, 'tokensOut': self.tokens_out,
             'tokens': self.tokens_in + self.tokens_out, 'error': self.error, 'source': self.source,
+            'cacheHit': self.cache_hit, 'cost': round(self.cost_usd, 5),
+            'estimateTokens': self.estimate_tokens, 'estimateCost': round(self.estimate_cost, 5),
             'owner': self.owner, 'verify': self.verify, 'suggested': self.suggested,
             'createdAt': self.created_at.isoformat() + 'Z' if self.created_at else None,
             'startedAt': self.started_at.isoformat() + 'Z' if self.started_at else None,
             'endedAt': self.ended_at.isoformat() + 'Z' if self.ended_at else None,
         }
+
+
+class PlanMemoryDocument(me.Document):
+    """A plan that produced a finished, error-free build. Reused as an example for similar goals."""
+    owner = me.StringField(default='')
+    goal = me.StringField(default='')
+    project_name = me.StringField(default='')
+    summary = me.StringField(default='')
+    contract = me.StringField(default='')
+    modules = me.ListField(me.DictField(), default=list)    # [{title, folder, depends, description, expects}]
+    words = me.ListField(me.StringField(), default=list)    # keywords for matching
+    uses = me.IntField(default=0)
+    created_at = me.DateTimeField(default=datetime.utcnow)
+
+    meta = {'collection': 'plan_memory', 'indexes': ['owner', '-created_at']}
+
+
+class PcSettingsDocument(me.Document):
+    """PC control settings per user: extra allowed folders, the pause switch and trust mode."""
+    owner = me.StringField(unique=True, required=True)
+    folders = me.ListField(me.StringField(), default=list)     # folders the user chose "Always allow" for (Desktop is built in)
+    paused = me.BooleanField(default=False)                    # emergency stop
+    trust = me.BooleanField(default=False)                     # run plain file changes in allowed folders without asking
+
+    meta = {'collection': 'pc_settings'}
+
+
+class PcTaskDocument(me.Document):
+    """One request to control the PC, with its steps and what is waiting for the user."""
+    task_id = me.StringField(unique=True, required=True)
+    owner = me.StringField(required=True)
+    run_id = me.StringField(default='')
+    request = me.StringField(default='')
+    status = me.StringField(default='planning')    # planning|awaiting_approval|running|done|failed|denied|cancelled
+    say = me.StringField(default='')
+    steps = me.ListField(me.DictField(), default=list)
+    transcript = me.ListField(me.StringField(), default=list)
+    pending_folders = me.ListField(me.StringField(), default=list)
+    pending_phase = me.StringField(default='')     # run | propose
+    granted = me.ListField(me.StringField(), default=list)     # folders allowed "once" for this task
+    untrusted = me.BooleanField(default=False)     # the plan was made after reading file contents
+    rounds = me.IntField(default=0)
+    error = me.StringField(default='')
+    created_at = me.DateTimeField(default=datetime.utcnow)
+    ended_at = me.DateTimeField()
+
+    meta = {'collection': 'pc_tasks', 'ordering': ['-created_at'], 'indexes': ['task_id', 'owner', '-created_at']}
+
+    def to_dict(self):
+        steps = [{k: (v[:1500] if isinstance(v, str) else v) for k, v in s.items() if k != 'reported'} for s in self.steps]
+        undoable = PcActionDocument.objects(task_id=self.task_id, undone=False, ok=True, undo__ne={}).count()
+        return {'id': self.task_id, 'runId': self.run_id, 'request': self.request, 'status': self.status, 'say': self.say,
+                'steps': steps, 'pendingFolders': self.pending_folders, 'pendingPhase': self.pending_phase,
+                'untrusted': self.untrusted, 'error': self.error, 'undoable': undoable,
+                'createdAt': self.created_at.isoformat() + 'Z' if self.created_at else None}
+
+
+class PcActionDocument(me.Document):
+    """Activity log: one row per tool run, with how to undo it."""
+    task_id = me.StringField(default='')
+    owner = me.StringField(default='')
+    tool = me.StringField(default='')
+    summary = me.StringField(default='')
+    risk = me.StringField(default='')
+    ok = me.BooleanField(default=True)
+    result = me.StringField(default='')
+    undo = me.DictField(default=dict)
+    undone = me.BooleanField(default=False)
+    auto = me.BooleanField(default=False)          # ran without a click (trust mode)
+    created_at = me.DateTimeField(default=datetime.utcnow)
+
+    meta = {'collection': 'pc_actions', 'ordering': ['-created_at'], 'indexes': ['task_id', 'owner', '-created_at']}
+
+    def to_dict(self):
+        return {'id': str(self.id), 'taskId': self.task_id, 'tool': self.tool, 'summary': self.summary, 'risk': self.risk,
+                'ok': self.ok, 'result': self.result, 'undone': self.undone, 'canUndo': bool(self.undo) and not self.undone and self.ok,
+                'auto': self.auto, 'createdAt': self.created_at.isoformat() + 'Z' if self.created_at else None}
+
+
+class UsageDocument(me.Document):
+    """Ledger: one row per model call. Powers the token calculator."""
+    owner = me.StringField(default='')
+    run_id = me.StringField(default='')
+    task_id = me.StringField(default='')
+    purpose = me.StringField(default='other')      # answer|plan|critic|agent|fix|review|assistant
+    model = me.StringField(default='')
+    tokens_in = me.IntField(default=0)
+    cache_hit = me.IntField(default=0)
+    tokens_out = me.IntField(default=0)
+    cost_usd = me.FloatField(default=0.0)
+    saved_usd = me.FloatField(default=0.0)         # what the cache saved versus full price
+    created_at = me.DateTimeField(default=datetime.utcnow)
+
+    meta = {'collection': 'usage', 'indexes': ['run_id', 'owner', '-created_at']}
 
 
 class AgentTaskDocument(me.Document):
@@ -332,6 +186,11 @@ class AgentTaskDocument(me.Document):
     summary = me.StringField(default='')
     error = me.StringField(default='')
     files = me.ListField(me.DictField(), default=list)
+    expects = me.ListField(me.StringField(), default=list)   # files this agent must produce (acceptance check)
+    notes = me.StringField(default='')             # the user's answers to this agent's questions
+    asks = me.IntField(default=0)                  # questions this agent has asked
+    replans = me.IntField(default=0)               # times the planner revised this agent's assignment
+    replaced = me.BooleanField(default=False)     # superseded by a revised plan
     log = me.ListField(me.DictField(), default=list)
     order = me.IntField(default=0)
     started_at = me.DateTimeField()
@@ -347,7 +206,7 @@ class AgentTaskDocument(me.Document):
             'model': self.model, 'attempts': self.attempts,
             'tokensIn': self.tokens_in, 'tokensOut': self.tokens_out,
             'tokens': self.tokens_in + self.tokens_out, 'summary': self.summary, 'error': self.error,
-            'fileCount': len(self.files), 'order': self.order,
+            'fileCount': len(self.files), 'order': self.order, 'replaced': self.replaced, 'replans': self.replans,
             'startedAt': self.started_at.isoformat() + 'Z' if self.started_at else None,
             'endedAt': self.ended_at.isoformat() + 'Z' if self.ended_at else None,
             'lastLog': self.log[-1]['msg'] if self.log else '',
@@ -396,7 +255,7 @@ class MemoryDocument(me.Document):
 
 
 class ScheduleDocument(me.Document):
-    """Recurring goal. Runs unattended, so it uses env/Ollama models only (keys are never stored)."""
+    """Recurring goal. Runs unattended, so it uses the server's DeepSeek key unless keys are stored (keys are never stored)."""
     sched_id = me.StringField(unique=True, required=True)
     name = me.StringField(required=True)
     goal = me.StringField(required=True)
@@ -428,6 +287,8 @@ class UserDocument(me.Document):
     username = me.StringField(unique=True, required=True)
     password_hash = me.StringField(required=True)
     role = me.StringField(default='member')        # admin | member | viewer
+    deepseek_enc = me.StringField(default='')      # Fernet-encrypted DeepSeek API key
+    tavily_enc = me.StringField(default='')        # Fernet-encrypted Tavily (web search) API key
     created_at = me.DateTimeField(default=datetime.utcnow)
 
     meta = {'collection': 'users'}

@@ -1,5 +1,5 @@
 """Scheduled runs: interval ('every N minutes') or daily at HH:MM (server local time).
-Unattended runs use server env keys, local Ollama, or keys you explicitly chose to store (encrypted at rest)."""
+Unattended runs use the server's DEEPSEEK_API_KEY, or keys you explicitly chose to store (encrypted at rest)."""
 
 import re
 import time
@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
 
 from models import ScheduleDocument
-from auth import path_allowed, current_user, is_admin, encrypt_json, decrypt_json
+from auth import path_allowed, current_user, is_admin, encrypt_json, decrypt_json, with_stored_key
 
 schedules_bp = Blueprint('schedules', __name__)
 
@@ -38,7 +38,7 @@ def _tick():
     now = datetime.utcnow()
     for s in ScheduleDocument.objects(enabled=True):
         if _due(s, now):
-            keys = decrypt_json(s.keys_enc) if s.keys_enc else {}
+            keys = with_stored_key(decrypt_json(s.keys_enc) if s.keys_enc else {}, s.owner)
             run = engine.create_run(s.goal, s.target_path, keys, s.planner_model, s.worker_model,
                                     s.max_tokens, source='schedule', memory=recall(s.goal), owner=s.owner)
             s.update(set__last_run_at=now, set__last_run_id=run.run_id)

@@ -16,6 +16,11 @@ export function setToken(t: string) {
 const PROXY = '/api/py';
 const DIRECT = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://127.0.0.1:5000') + '/api';
 
+/** The backend's origin (for iframe/preview URLs that cannot go through the Next.js proxy). */
+export function backendOrigin(): string {
+  return DIRECT.replace(/\/api$/, '');
+}
+
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
@@ -35,17 +40,29 @@ export async function api<T = unknown>(path: string, init: RequestInit & { json?
   return data as T;
 }
 
+export function screenshotUrl(runId: string, bust: string | number = ''): string {
+  return `${DIRECT}/runs/${runId}/screenshot?token=${encodeURIComponent(getToken())}&t=${bust}`;
+}
+
 export function streamUrl(runId: string): string {
   return `${DIRECT}/runs/${runId}/stream?token=${encodeURIComponent(getToken())}`;
 }
 
 // ───────── shared types ─────────
-export type TaskStatus = 'queued' | 'running' | 'done' | 'failed' | 'skipped' | 'cancelled';
-export type RunStatus = 'planning' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type TaskStatus = 'queued' | 'running' | 'waiting' | 'done' | 'failed' | 'skipped' | 'cancelled';
+export type RunStatus = 'planning' | 'awaiting_input' | 'awaiting_approval' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export interface RunQuestion { id: string; q: string; options: string[]; answer: string; taskId: string; agent?: string }
+export interface PlanModule { key: string; title: string; description: string; folder: string; depends_on: string[]; expects: string[] }
+export interface PlanDraft { project_name?: string; summary?: string; contract?: string; assumptions?: string[]; modules?: PlanModule[] }
+export interface BrowserCheck {
+  ok?: boolean; url?: string; title?: string; skipped?: boolean; reason?: string; round?: number; screenshot?: boolean;
+  buttons?: number; issues?: { level: 'error' | 'warn'; msg: string }[]; links?: { url: string; status: number }[];
+}
 
 export interface AgentTask {
   id: string; runId: string; key: string; kind: 'module' | 'verify' | 'review'; parentId: string; title: string; description: string;
-  folder: string; dependsOn: string[]; status: TaskStatus; model: string; attempts: number;
+  folder: string; dependsOn: string[]; status: TaskStatus; model: string; attempts: number; replaced: boolean; replans: number;
   tokens: number; tokensIn: number; tokensOut: number; summary: string; error: string;
   fileCount: number; order: number; startedAt: string | null; endedAt: string | null; lastLog: string;
   files?: { path: string; size: number; language: string }[];
@@ -53,7 +70,9 @@ export interface AgentTask {
 }
 
 export interface Run {
-  id: string; goal: string; projectName: string; summary: string; targetPath: string; status: RunStatus;
+  id: string; goal: string; projectName: string; summary: string; answer: string; sources: { title: string; url: string }[]; kind: string; mode: 'build' | 'edit'; parentRunId: string;
+  reviewPlan: boolean; deepPlan: boolean; reusedPlan: string; pcTaskId: string; questions: RunQuestion[]; plan: PlanDraft; assumptions: string[]; revisions: number; check: BrowserCheck; cost: number; cacheHit: number;
+  estimateTokens: number; estimateCost: number; targetPath: string; status: RunStatus;
   plannerModel: string; workerModel: string; maxTokens: number; tokens: number; tokensIn: number;
   tokensOut: number; error: string; source: string; createdAt: string | null;
   startedAt: string | null; endedAt: string | null;
@@ -73,6 +92,39 @@ export interface MemoryItem { id: string; text: string; kind: string; createdAt:
 export interface Schedule {
   id: string; name: string; goal: string; targetPath: string; everyMinutes: number; dailyAt: string;
   enabled: boolean; lastRunAt: string | null; lastRunId: string; maxTokens: number; hasKeys: boolean;
+}
+
+export function fmtCost(usd: number): string {
+  if (!usd) return '$0.00';
+  if (usd < 0.01) return '$' + usd.toFixed(4);
+  return '$' + usd.toFixed(usd < 1 ? 3 : 2);
+}
+
+export interface PcStep {
+  id: string; tool: string; args: Record<string, unknown>; risk: 'read' | 'low' | 'change' | 'danger';
+  status: 'pending' | 'ok' | 'error' | 'denied' | 'skipped'; preview: string; result: string; error: string; needs: string[]; untrusted: boolean;
+}
+export interface PcTask {
+  id: string; runId: string; request: string; status: 'planning' | 'awaiting_approval' | 'running' | 'done' | 'failed' | 'denied' | 'cancelled';
+  say: string; steps: PcStep[]; pendingFolders: string[]; pendingPhase: string; untrusted: boolean; error: string; undoable: number;
+  createdAt: string | null; undoReport?: { undone: number; failed: string[] };
+}
+export interface PcSettings { paused: boolean; trust: boolean; desktop: string; folders: string[]; known: Record<string, string> }
+export interface PcAction { id: string; taskId: string; tool: string; summary: string; risk: string; ok: boolean; result: string; undone: boolean; canUndo: boolean; auto: boolean; createdAt: string | null }
+export interface PcActivity { actions: PcAction[]; tasks: PcTask[] }
+
+export interface Forecast {
+  kind: 'chat' | 'small' | 'large' | 'auto' | 'pc'; modules: number; tokens: number; low: number; high: number;
+  cost: number; costLow: number; costHigh: number; parts: { name: string; tokens: number; cost: number }[];
+}
+
+export interface UsageStats {
+  days: number; calls: number; tokensIn: number; tokensOut: number; tokens: number; cacheHit: number; cacheRate: number;
+  cost: number; saved: number;
+  byDay: { day: string; tokens: number; cost: number; calls: number }[];
+  byPurpose: { purpose: string; tokens: number; cost: number; calls: number }[];
+  runs: { id: string; goal: string; status: string; tokens: number; cost: number; estimate: number }[];
+  prices: { hit: number; miss: number; out: number };
 }
 
 export function fmtTokens(n: number): string {
