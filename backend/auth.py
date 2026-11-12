@@ -116,7 +116,7 @@ def require_auth():
         return jsonify({'error': 'admin only'}), 403
     if request.path.startswith('/api/jobs') and role != 'admin':
         return jsonify({'error': 'background shell jobs are admin only'}), 403
-    if write and role == 'viewer' and request.path not in ('/api/auth/password', '/api/assistant/chat'):
+    if write and role == 'viewer' and request.path not in ('/api/auth/password', '/api/assistant/chat', '/api/voice/tts', '/api/voice/detect', '/api/voice/transcribe'):
         return jsonify({'error': 'viewers are read-only'}), 403
     return None
 

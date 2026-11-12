@@ -17,6 +17,19 @@ const PROXY = '/api/py';
 const DIRECT = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://127.0.0.1:5000') + '/api';
 
 /** The backend's origin (for iframe/preview URLs that cannot go through the Next.js proxy). */
+/** POST JSON, get raw bytes back (used for speech audio). */
+export async function apiBytes(path: string, json: unknown): Promise<ArrayBuffer> {
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  const token = getToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const res = await fetch(PROXY + path, { method: 'POST', headers, body: JSON.stringify(json) });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError((data as { error?: string }).error || `HTTP ${res.status}`, res.status);
+  }
+  return res.arrayBuffer();
+}
+
 export function backendOrigin(): string {
   return DIRECT.replace(/\/api$/, '');
 }

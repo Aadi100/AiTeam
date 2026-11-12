@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Settings } from 'lucide-react';
+import { Settings, Mic } from 'lucide-react';
 import { AppProvider, useApp } from '@/context/AppContext';
 import LoginScreen from '@/components/LoginScreen';
 import GoalConsole from '@/components/GoalConsole';
@@ -10,6 +10,7 @@ import TaskDrawer from '@/components/TaskDrawer';
 import SidePanel from '@/components/SidePanel';
 import SettingsModal from '@/components/SettingsModal';
 import GlobalVoiceBar from '@/components/GlobalVoiceBar';
+import VoiceSettings from '@/components/VoiceSettings';
 import PcDock from '@/components/PcDock';
 import VoiceOrb from '@/components/VoiceOrb';
 import { VoiceProvider, useVoice } from '@/context/VoiceContext';
@@ -22,7 +23,7 @@ const ROLE_STYLE: Record<string, string> = {
 
 function Shell() {
   const { authed, setSettingsOpen, user, snap } = useApp();
-  const { isVoiceActive, isThinking, isSpeaking } = useVoice();
+  const { isVoiceActive, isThinking, isSpeaking, setVoiceSettingsOpen } = useVoice();
   if (authed === null) return <div className="min-h-screen bg-slate-950" />;
   if (!authed) return <LoginScreen />;
   const building = !!snap && ['planning', 'running'].includes(snap.run.status);
@@ -48,6 +49,10 @@ function Shell() {
                 {user.username} · {user.role}
               </span>
             )}
+            <button onClick={() => setVoiceSettingsOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-800 hover:border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 hover:text-white transition">
+              <Mic className="h-3.5 w-3.5" /> Voice
+            </button>
             <button onClick={() => setSettingsOpen(true)}
               className="flex items-center gap-1.5 rounded-lg border border-slate-800 hover:border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 hover:text-white transition">
               <Settings className="h-3.5 w-3.5" /> Models &amp; keys
@@ -65,6 +70,7 @@ function Shell() {
       <TaskDrawer />
       <SettingsModal />
       <PcDock />
+      <VoiceSettings />
       <GlobalVoiceBar />
     </div>
   );

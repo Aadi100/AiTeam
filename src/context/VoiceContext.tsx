@@ -11,7 +11,8 @@
  */
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, apiBytes } from '@/lib/api';
+import { DEFAULT_PREFS, loadPrefs, savePrefs as savePrefsStore, pickBrowserVoice, playBuffer, splitSentences, SAMPLES, type VoicePrefs } from '@/lib/voice';
 import { useApp } from '@/context/AppContext';
 
 interface SpeechRec {
@@ -41,7 +42,13 @@ interface VoiceCtx {
   toggleWakeWord: () => void;
   toggleConversationMode: () => void;
   sendText: (text: string) => void;
-  speakText: (text: string) => Promise<void>;
+  speakText: (text: string, lang?: string) => Promise<void>;
+  voicePrefs: VoicePrefs;
+  setVoicePrefs: (patch: Partial<VoicePrefs>) => void;
+  voiceStatus: { natural: boolean; whisper: boolean } | null;
+  voiceSettingsOpen: boolean;
+  setVoiceSettingsOpen: (v: boolean) => void;
+  previewVoice: (lang?: string) => Promise<void>;
   stopSpeaking: () => void;
   clearMessages: () => void;
 }
@@ -58,12 +65,12 @@ const PREFS_KEY = 'devsquad.voice.v2';
 const WAKE = /\b(?:adion|a\s?dion|adian|adeon|a\s?deon|addion|aidan|aiden|ad\s?ion)\b[\s,.!?:;-]*(.*)$/i;
 
 interface ChatReply {
-  reply: string; readout?: string;
+  reply: string; readout?: string; lang?: string;
   action: { type: 'none' | 'build' | 'cancel' | 'read_file' | 'remember' | 'pc'; goal?: string; taskId?: string };
 }
 
 export function VoiceProvider({ children }: { children: React.ReactNode }) {
-  const { startRun, cancelRun, snap, setGoal, settings, setPcTaskId } = useApp();
+  const { startRun, cancelRun, snap, setGoal, settings, setPcTaskId, authed } = useApp();
   const [isVoiceActive, setActive] = useState(false);
   const [isThinking, setThinking] = useState(false);
   const [isSpeaking, setSpeaking] = useState(false);
@@ -74,6 +81,16 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const [isAudioReplyEnabled, setAudio] = useState(true);
   const [isWakeWordEnabled, setWake] = useState(false);
   const [isConversationMode, setConv] = useState(true);
+  const [voicePrefs, setVoicePrefsState] = useState<VoicePrefs>(DEFAULT_PREFS);
+  const prefsRef = useRef<VoicePrefs>(DEFAULT_PREFS);
+  const [voiceStatus, setVoiceStatus] = useState<{ natural: boolean; whisper: boolean } | null>(null);
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const playingRef = useRef<{ stop: () => void } | null>(null);
+  const lastLangRef = useRef('');            // the language of the last thing you said or Adion said
+  const warnedRef = useRef(false);
+  const whisperRef = useRef<boolean | null>(null);   // is any-language listening installed on the server? (null = not known yet)
+  const vadCleanupRef = useRef<() => void>(() => {});
 
   const recRef = useRef<SpeechRec | null>(null);
   const mediaRef = useRef<MediaRecorder | null>(null);
@@ -116,6 +133,21 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       }
     } catch { /* ignore */ }
   }, []);
+  useEffect(() => {
+    const p = loadPrefs();
+    prefsRef.current = p;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore from localStorage
+    setVoicePrefsState(p);
+  }, []);
+  useEffect(() => {
+    if (!authed) return;
+    api<{ natural: boolean; whisper: boolean }>('/voice/status').then(s => { whisperRef.current = s.whisper; setVoiceStatus(s); }).catch(() => setVoiceStatus(null));
+  }, [authed]);
+  const setVoicePrefs = useCallback((patch: Partial<VoicePrefs>) => {
+    const next = { ...prefsRef.current, ...patch };
+    prefsRef.current = next; setVoicePrefsState(next); savePrefsStore(next);
+  }, []);
+
   const savePrefs = (auto: boolean, audio: boolean, conv: boolean) => {
     try { localStorage.setItem(PREFS_KEY, JSON.stringify({ auto, audio, conv })); } catch { /* ignore */ }
   };
@@ -124,40 +156,98 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     setMessages(m => [...m.slice(-49), { id: msgId.current++, role, text }]);
   }, []);
 
-  // ───────── speech output (chunked so long text is read in full) ─────────
-  const speakText = useCallback(async (text: string) => {
-    if (!audioRef.current || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  // ───────── speech output: natural neural voices in any language, or this device's own voices ─────────
+  const getAudioCtx = () => {
+    if (!audioCtxRef.current) {
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      audioCtxRef.current = new AC();
+    }
+    if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume().catch(() => { /* needs a click first */ });
+    return audioCtxRef.current;
+  };
+
+  const detectLang = useCallback(async (text: string): Promise<string> => {
+    try { return (await api<{ lang: string }>('/voice/detect', { method: 'POST', json: { text: text.slice(0, 400), hint: lastLangRef.current } })).lang || 'en'; }
+    catch { return lastLangRef.current || 'en'; }
+  }, []);
+
+  const speakBrowser = useCallback(async (chunks: string[], lang: string, token: number) => {
     const synth = window.speechSynthesis;
-    const token = ++speakTokenRef.current;
-    synth.cancel();
-    const clean = text.replace(/[*#`_>|]/g, ' ').replace(/\s+/g, ' ').trim();
-    const chunks = clean.match(/[^.!?\n]+[.!?]*/g)?.flatMap(s => (s.length > 220 ? s.match(/.{1,220}(\s|$)/g) || [s] : [s])) || [];
-    if (!chunks.length) return;
-    const voices = synth.getVoices();
-    const voice = voices.find(v => v.name.includes('Google US English') || v.name.includes('Natural'))
-      || voices.find(v => v.lang.startsWith('en')) || voices[0];
-    setSpeaking(true);
+    const p = prefsRef.current;
+    const voice = pickBrowserVoice(synth.getVoices(), lang, p.gender, p.browserVoice);
     for (const c of chunks) {
       if (speakTokenRef.current !== token) break;
       await new Promise<void>(res => {
-        const u = new SpeechSynthesisUtterance(c.trim());
-        u.rate = 1.05; u.pitch = 1.0;
-        if (voice) u.voice = voice;
+        const u = new SpeechSynthesisUtterance(c);
+        u.rate = p.rate; u.pitch = 1 + p.pitch / 60;
+        if (voice) { u.voice = voice; u.lang = voice.lang; } else u.lang = lang;
         u.onend = () => res(); u.onerror = () => res();
         synth.speak(u);
       });
     }
-    if (speakTokenRef.current === token) setSpeaking(false);
   }, []);
+
+  const speak = useCallback(async (text: string, lang0: string | undefined, force: boolean) => {
+    if ((!audioRef.current && !force) || typeof window === 'undefined') return;
+    const token = ++speakTokenRef.current;
+    playingRef.current?.stop(); playingRef.current = null;
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    const p0 = prefsRef.current;
+    const chunks = splitSentences(text, p0.engine === 'natural' ? 300 : 220);
+    if (!chunks.length) return;
+    const lang = lang0 || await detectLang(text);
+    if (speakTokenRef.current !== token) return;
+    lastLangRef.current = lang;
+    setSpeaking(true);
+    try {
+      const p = prefsRef.current;
+      let useBrowser = p.engine === 'browser' || !(typeof AudioContext !== 'undefined' || 'webkitAudioContext' in window);
+      let played = 0;
+      if (!useBrowser) {
+        try {
+          const ctx = getAudioCtx();
+          const fetchClip = (t: string) => apiBytes('/voice/tts', { text: t, lang, voice: p.voice, gender: p.gender, rate: Math.round((p.rate - 1) * 100), pitch: Math.round(p.pitch) })
+            .then(b => ctx.decodeAudioData(b));
+          let next = fetchClip(chunks[0]);
+          for (let i = 0; i < chunks.length; i++) {
+            const buf = await next;
+            if (speakTokenRef.current !== token) break;
+            next = i + 1 < chunks.length ? fetchClip(chunks[i + 1]) : Promise.resolve(buf);
+            next.catch(() => { /* reported when awaited */ });
+            const h = playBuffer(ctx, buf, p.style, 1);
+            playingRef.current = h;
+            await h.done;
+            played = i + 1;
+          }
+        } catch (e) {
+          if (speakTokenRef.current === token) {
+            if (!warnedRef.current) { warnedRef.current = true; setError('The natural voice is not reachable, so I used your device voice. ' + (e instanceof Error ? e.message : '')); }
+            useBrowser = true;
+          }
+        }
+      }
+      if (useBrowser && speakTokenRef.current === token && 'speechSynthesis' in window) await speakBrowser(chunks.slice(played), lang, token);
+    } finally {
+      if (speakTokenRef.current === token) setSpeaking(false);
+    }
+  }, [detectLang, speakBrowser]);
+
+  const speakText = useCallback((text: string, lang?: string) => speak(text, lang, false), [speak]);
+  const previewVoice = useCallback(async (lang?: string) => {
+    const l = lang && SAMPLES[lang] ? lang : 'en';
+    await speak(SAMPLES[l], l, true);
+  }, [speak]);
 
   const stopSpeaking = useCallback(() => {
     speakTokenRef.current++;
+    playingRef.current?.stop(); playingRef.current = null;
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
     setSpeaking(false);
   }, []);
 
   // ───────── microphone ─────────
   const killRec = useCallback(() => {
+    vadCleanupRef.current();
     const r = recRef.current;
     recRef.current = null;
     if (r) { r.onend = null; r.onresult = null; r.onerror = null; try { r.abort(); } catch { /* ignore */ } }
@@ -195,6 +285,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     setThinking(true);
     let reply = '';
     let readout = '';
+    let replyLang = '';
     try {
       const c = ctxRef.current;
       const res = await api<ChatReply>('/assistant/chat', {
@@ -203,14 +294,15 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       });
       reply = res.reply;
       readout = res.readout || '';
+      replyLang = res.lang || '';
       reply += await handleAction(res);
     } catch (e) {
       reply = e instanceof Error ? e.message : 'Something went wrong.';
     }
     setThinking(false);
     addMsg('assistant', reply);
-    await speakText(reply);
-    if (readout) await speakText(readout);
+    await speakText(reply, replyLang || undefined);
+    if (readout) await speakText(readout, replyLang || undefined);
     busyRef.current = false;
     missesRef.current = 0;
     resume();
@@ -224,9 +316,11 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     const w = window as unknown as { SpeechRecognition?: SpeechCtor; webkitSpeechRecognition?: SpeechCtor };
     const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
 
-    if (Ctor) {
+    const wanted = prefsRef.current.sttLang;
+    const anyLanguage = kind === 'command' && wanted === 'auto' && (whisperRef.current !== false || !Ctor);   // no Whisper installed: fall back to English live recognition   // offline Whisper listens in any language
+    if (Ctor && !anyLanguage) {
       const rec = new Ctor();
-      rec.lang = 'en-US';
+      rec.lang = kind === 'wake' || wanted === 'auto' ? 'en-US' : wanted;   // the wake word "Adion" is always listened for in English
       rec.interimResults = true;
       rec.continuous = kind === 'wake';
       let silenceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -295,25 +389,59 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Firefox / Safari: record, then transcribe on the server with Whisper (no wake word here)
+    // Any language (or Firefox/Safari): record until you stop talking, then Whisper on this PC transcribes it and tells the language
     if (kind === 'wake') { setError('Wake word needs Chrome or Edge. Use the mic button instead.'); setWake(false); wakeRef.current = false; return; }
+    if (!navigator.mediaDevices?.getUserMedia) { setError('Microphone unavailable in this browser'); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const actx = new AC();
+      const analyser = actx.createAnalyser(); analyser.fftSize = 1024;
+      actx.createMediaStreamSource(stream).connect(analyser);
+      const samples = new Float32Array(analyser.fftSize);
       const chunks: Blob[] = [];
       const mr = new MediaRecorder(stream);
-      mr.ondataavailable = e => chunks.push(e.data);
+      mr.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+      let heard = false, stopped = false;
+      const startedAt = Date.now();
+      let quietSince = startedAt;
+      const finish = () => { if (stopped) return; stopped = true; clearInterval(timer); if (mr.state !== 'inactive') mr.stop(); };
+      const timer = setInterval(() => {
+        analyser.getFloatTimeDomainData(samples);
+        let sum = 0;
+        for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+        const now = Date.now();
+        if (Math.sqrt(sum / samples.length) > 0.02) { heard = true; quietSince = now; }
+        if (heard && now - quietSince > 1400) finish();            // you stopped talking
+        else if (!heard && now - startedAt > 7000) finish();       // nobody said anything
+        else if (now - startedAt > 25000) finish();
+      }, 120);
+      const release = () => { clearInterval(timer); stream.getTracks().forEach(t => t.stop()); actx.close().catch(() => { /* closed */ }); vadCleanupRef.current = () => {}; };
+      vadCleanupRef.current = () => { stopped = true; mr.onstop = null; if (mr.state !== 'inactive') mr.stop(); release(); };
       mr.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
+        release();
         setActive(false);
+        if (!heard) {
+          missesRef.current++;
+          if (convRef.current && sessionRef.current && missesRef.current < 2 && !busyRef.current) listenRef.current('command'); else sessionRef.current = false;
+          return;
+        }
+        setTranscript('Understanding what you said…');
         try {
           const fd = new FormData();
           fd.append('audio', new Blob(chunks, { type: mr.mimeType }), 'speech.webm');
-          const r = await api<{ text: string }>('/voice/transcribe', { method: 'POST', body: fd });
-          await processRef.current(r.text);
-        } catch (e) { setError(e instanceof Error ? e.message : 'Transcription failed'); }
+          const fixed = prefsRef.current.sttLang;
+          if (fixed && fixed !== 'auto') fd.append('language', fixed);
+          if (lastLangRef.current) fd.append('hint', lastLangRef.current);
+          const r = await api<{ text: string; language: string }>('/voice/transcribe', { method: 'POST', body: fd });
+          if (r.language) lastLangRef.current = r.language;
+          setTranscript('');
+          if (r.text.trim().length > 1) await processRef.current(r.text);
+          else { missesRef.current++; if (convRef.current && sessionRef.current && missesRef.current < 2 && !busyRef.current) listenRef.current('command'); else sessionRef.current = false; }
+        } catch (e) { setTranscript(''); setError(e instanceof Error ? e.message : 'Transcription failed'); }
       };
       mediaRef.current = mr;
-      mr.start(); setActive(true);
+      mr.start(250); setActive(true); setTranscript('Listening, speak in any language…');
     } catch { setError('Microphone unavailable or permission denied'); }
   }, [killRec, speakText]);
 
@@ -410,6 +538,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       isVoiceActive, isThinking, isSpeaking, voiceTranscript, voiceError, messages, isAutoProcessVoice,
       isAudioReplyEnabled, isWakeWordEnabled, isConversationMode, toggleVoiceListening, toggleAutoProcessVoice,
       toggleAudioReply, toggleWakeWord, toggleConversationMode, sendText, speakText, stopSpeaking, clearMessages,
+      voicePrefs, setVoicePrefs, voiceStatus, voiceSettingsOpen, setVoiceSettingsOpen, previewVoice,
     }}>
       {children}
     </Ctx.Provider>

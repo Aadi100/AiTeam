@@ -75,7 +75,7 @@ goal such as *"a CRM with a dashboard, pipeline board and contacts"* (planner, p
 - **Usage tab** shows cost, tokens, cache savings and forecasts before you run anything.
 - **Attachments**: click **Attach** or drag files into the box (documents, PDFs, spreadsheets as CSV, pictures). Adion reads the text (scanned pages and pictures by free local OCR) and can use pictures and data files in a build. It cannot *see* pictures, only the text in them.
 - **PC control** (admin): say or type "open Spotify", "find my invoices on the desktop", "move these into a folder", "how much disk space is left". Only the Desktop is open by default, any other folder asks first, changes and deletes need your approval, and everything can be undone and is logged. See the **PC** tab for the pause switch, trust mode and allowed folders.
-- **Voice**: click the mic or press `Alt+V`. Say "Adion" to wake it. Needs Chrome or Edge.
+- **Voice**: click the mic or press `Alt+V`. Say "Adion" to wake it (Chrome or Edge). Speak in **any language** and Adion answers in it. Open **Voice** in the header to pick a male or female voice from 300+ natural voices in 75 languages, a style (robot, deep, radio...), and the language you listen in. The first any-language recognition downloads a ~140 MB speech model.
 
 ## Where things live
 

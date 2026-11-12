@@ -25,7 +25,10 @@ You are talking OUT LOUD, so: 1 to 3 short sentences, plain spoken English, no m
 Be warm, quick and personal. Use the user's name sometimes. Use their remembered preferences. If you are unsure, say so.
 You can see the CONTEXT below (current build, agents, files, memory, date/time). Answer questions from it; never invent files or results.
 
-Return ONLY JSON: {"reply": "what you say", "action": {"type": "none|build|cancel|read_file|remember|pc", "goal": "", "path": "", "text": "", "request": ""}}
+LANGUAGE: always reply in the SAME language the user just spoke or wrote (Hindi, Urdu, Arabic, Spanish, French... anything), unless they ask you to switch.
+Put that language's two-letter ISO 639-1 code in "lang" (for example en, hi, ur, ar, es).
+
+Return ONLY JSON: {"reply": "what you say", "lang": "en", "action": {"type": "none|build|cancel|read_file|remember|pc", "goal": "", "path": "", "text": "", "request": ""}}
 
 Action rules:
 - build: the user wants software created or changed. goal = one complete self-contained description using everything they said. In reply, confirm briefly what you are starting.
@@ -94,7 +97,8 @@ def chat():
         return jsonify({'reply': (text or 'Sorry, I lost my train of thought.').strip()[:600], 'action': {'type': 'none'}})
     action = data.get('action') if isinstance(data.get('action'), dict) else {'type': 'none'}
     atype = action.get('type') if action.get('type') in ('none', 'build', 'cancel', 'read_file', 'remember', 'pc') else 'none'
-    out = {'reply': data['reply'].strip()[:600], 'action': {'type': atype}}
+    lang = str(data.get('lang') or '').strip().lower().split('-')[0]
+    out = {'reply': data['reply'].strip()[:600], 'action': {'type': atype}, 'lang': lang if 2 <= len(lang) <= 3 and lang.isalpha() else ''}
 
     if atype == 'pc':
         from orchestrator.pc import engine as pc_engine

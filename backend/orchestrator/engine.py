@@ -339,7 +339,7 @@ ANSWER_SYSTEM = ("You are Adion, a sharp personal assistant having an ongoing co
                  "paragraphs or a compact list. If CONVERSATION SO FAR is given, use it: resolve words like it, his, her, that from it, and "
                  "do not repeat what was already said. You were given no web sources this time, so your knowledge has a cutoff date: for "
                  "anything recent or that you are unsure about, say what you do know, say you are not certain, and never invent details. "
-                 "Do not offer to build anything.")
+                 "Do not offer to build anything. Always reply in the language the user wrote in, whatever it is.")
 
 SMALL_CONTRACT = ("stack: plain HTML/CSS/JS in a few files (index.html, style.css, app.js) unless the goal clearly needs a backend, "
                   "then Python Flask (app.py, requirements.txt) serving the page at /.\n"

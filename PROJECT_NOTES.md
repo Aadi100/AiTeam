@@ -95,6 +95,14 @@ Adion can look at and operate your PC through a fixed set of tools (`backend/orc
 - **Follow-up searches:** a vague message like "go read its real information" is rewritten into a real search query using the conversation, so the search is about the right person or topic.
 - **No key:** Adion answers from what it knows and says plainly that adding a free Tavily key lets it look the answer up.
 
+## Voice: any language, any voice
+- **Reply language:** Adion answers in the language you used (Hindi, Urdu, Arabic, Spanish...), in chat, answers and voice. The assistant returns the language code; for anything else the server detects it from the text (script first, then word statistics).
+- **Voices (Voice button in the header, or the sliders icon on the dock):** *Natural* = Microsoft neural voices through `edge-tts` (300+ voices, 75 languages, male and female, no key). The text Adion speaks is sent to Microsoft's online speech service. *This device* = the browser's own voices (private and offline, fewer languages). A voice you pick is used when it speaks the reply's language; otherwise the best voice for that language is chosen (known adult voices first).
+- **Styles:** Robot, Deep, Radio, Echo, Chipmunk play on top of any Natural voice (Web Audio effects). Speed and pitch sliders.
+- **Listening language:** default is *any language, detected automatically* (Whisper `base` running on this PC through `faster-whisper`; the first use downloads about 140 MB; set `WHISPER_MODEL=small` for better accuracy, slower). If Whisper is unsure it uses the language of the conversation. Or pick a fixed language for fast live recognition in the browser. The wake word "Adion" is always listened for in English. Without `faster-whisper` it falls back to English.
+- **Not available:** celebrity/actor voices (copying a real person's voice needs their permission and no free tool offers it).
+- Tests: `backend/tests/test_voice.py`.
+
 ## Known limits
 - Adion uses DeepSeek only (`deepseek-chat`, or slower `deepseek-reasoner`). No local models. It is a paid cloud API, so keep a token budget set.
 - Run-and-fix executes generated Python on your machine. It is opt-in per run, and the child process gets no API keys or

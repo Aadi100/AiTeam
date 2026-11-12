@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, Ear, EarOff, MessageSquare, Repeat, Send, X, Loader2 } from 'lucide-react';
+import { Mic, MicOff, Volume2, VolumeX, Ear, EarOff, MessageSquare, Repeat, Send, X, Loader2, SlidersHorizontal } from 'lucide-react';
 import { useVoice } from '@/context/VoiceContext';
 import { useApp } from '@/context/AppContext';
 import VoiceOrb from '@/components/VoiceOrb';
@@ -11,7 +11,7 @@ export default function GlobalVoiceBar() {
     isVoiceActive, isThinking, isSpeaking, voiceTranscript, voiceError, messages,
     isAudioReplyEnabled, isAutoProcessVoice, isWakeWordEnabled, isConversationMode,
     toggleVoiceListening, toggleAudioReply, toggleWakeWord, toggleConversationMode,
-    sendText, stopSpeaking, clearMessages,
+    sendText, stopSpeaking, clearMessages, setVoiceSettingsOpen,
   } = useVoice();
   const { snap } = useApp();
   const executing = !!snap && ['planning', 'running'].includes(snap.run.status);
@@ -104,6 +104,10 @@ export default function GlobalVoiceBar() {
           <button onClick={toggleConversationMode} title={isConversationMode ? 'Hands-free conversation ON: I keep listening after I answer' : 'Hands-free conversation OFF: one question at a time'}
             className={`p-2.5 rounded-xl cursor-pointer hidden sm:block ${isConversationMode ? 'bg-slate-800 text-cyan-300 hover:bg-slate-700' : 'bg-slate-800/40 text-slate-500 hover:text-slate-300'}`}>
             <Repeat className="w-4 h-4" />
+          </button>
+          <button onClick={() => setVoiceSettingsOpen(true)} title="Voice settings: pick a voice, style and language"
+            className="p-2.5 rounded-xl cursor-pointer bg-slate-800/40 text-slate-400 hover:text-slate-100 hover:bg-slate-700">
+            <SlidersHorizontal className="w-4 h-4" />
           </button>
           <button onClick={isSpeaking ? stopSpeaking : toggleAudioReply}
             title={isSpeaking ? 'Stop talking' : isAudioReplyEnabled ? 'Spoken replies ON (click to mute)' : 'Spoken replies MUTED (click to enable)'}
