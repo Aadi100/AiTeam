@@ -22,6 +22,7 @@ from routes.voice import voice_bp
 from routes.assistant import assistant_bp
 from routes.usage import usage_bp
 from routes.pc import pc_bp
+from routes.files import files_bp
 from auth import auth_bp, require_auth
 
 load_dotenv()
@@ -52,6 +53,7 @@ def create_app():
     app.register_blueprint(assistant_bp, url_prefix='/api')
     app.register_blueprint(usage_bp, url_prefix='/api')
     app.register_blueprint(pc_bp, url_prefix='/api')
+    app.register_blueprint(files_bp, url_prefix='/api')
     app.register_blueprint(auth_bp, url_prefix='/api')
     app.before_request(require_auth)
     mark_lost_on_boot()

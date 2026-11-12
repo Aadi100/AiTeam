@@ -71,7 +71,7 @@ export interface AgentTask {
 
 export interface Run {
   id: string; goal: string; projectName: string; summary: string; answer: string; sources: { title: string; url: string }[]; kind: string; mode: 'build' | 'edit'; parentRunId: string;
-  reviewPlan: boolean; deepPlan: boolean; reusedPlan: string; pcTaskId: string; questions: RunQuestion[]; plan: PlanDraft; assumptions: string[]; revisions: number; check: BrowserCheck; cost: number; cacheHit: number;
+  reviewPlan: boolean; deepPlan: boolean; reusedPlan: string; pcTaskId: string; attachments: { id: string; name: string; kind: string }[]; questions: RunQuestion[]; plan: PlanDraft; assumptions: string[]; revisions: number; check: BrowserCheck; cost: number; cacheHit: number;
   estimateTokens: number; estimateCost: number; targetPath: string; status: RunStatus;
   plannerModel: string; workerModel: string; maxTokens: number; tokens: number; tokensIn: number;
   tokensOut: number; error: string; source: string; createdAt: string | null;
@@ -99,6 +99,14 @@ export function fmtCost(usd: number): string {
   if (usd < 0.01) return '$' + usd.toFixed(4);
   return '$' + usd.toFixed(usd < 1 ? 3 : 2);
 }
+
+export interface Upload {
+  id: string; name: string; kind: 'text' | 'pdf' | 'docx' | 'image'; size: number; note: string; chars: number;
+  info: { width?: number; height?: number; format?: string; pages?: number; colors?: { hex: string; share: number }[] };
+}
+export const ATTACH_ACCEPT = '.txt,.md,.csv,.tsv,.json,.log,.html,.css,.js,.ts,.tsx,.jsx,.py,.xml,.yml,.yaml,.sql,.pdf,.docx,.png,.jpg,.jpeg,.gif,.bmp,.webp';
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 5;
 
 export interface PcStep {
   id: string; tool: string; args: Record<string, unknown>; risk: 'read' | 'low' | 'change' | 'danger';

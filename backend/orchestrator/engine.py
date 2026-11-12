@@ -16,7 +16,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 from models import RunDocument, AgentTaskDocument
-from . import llm, planner, sandbox, worker, verify, router, search, plans
+from . import llm, planner, sandbox, worker, verify, router, search, plans, files
 
 MAX_WORKERS = int(os.getenv('MAX_WORKERS', '6'))
 MAX_ATTEMPTS = 2
@@ -54,7 +54,7 @@ def _release(run_id):
 
 
 def create_run(goal, target_path, keys, planner_model='', worker_model='', max_tokens=0, source='manual',
-               memory='', owner='', verify_run=False, web_search=False, review_plan=False, continue_from='', deep_plan=True):
+               memory='', owner='', verify_run=False, web_search=False, review_plan=False, continue_from='', deep_plan=True, attachments=None):
     run_id = 'run_' + uuid.uuid4().hex[:10]
     mode, parent_id, project = 'build', '', ''
     if continue_from:   # a follow-up change to an existing project: same folder, planner sees what exists
@@ -69,7 +69,7 @@ def create_run(goal, target_path, keys, planner_model='', worker_model='', max_t
     run = RunDocument(run_id=run_id, goal=goal, target_path=target, mode=mode, parent_run_id=parent_id,
                       project_name=project, planner_model=planner_model or DEFAULT_PLANNER,
                       worker_model=worker_model or DEFAULT_WORKER, max_tokens=int(max_tokens or 0), source=source,
-                      owner=owner, verify=bool(verify_run), web_search=bool(web_search), review_plan=bool(review_plan), deep_plan=bool(deep_plan),
+                      owner=owner, verify=bool(verify_run), web_search=bool(web_search), review_plan=bool(review_plan), deep_plan=bool(deep_plan), attachments=attachments or [],
                       started_at=_now())
     run.save()
     _activate(run_id, keys, memory)
@@ -343,17 +343,21 @@ SMALL_CONTRACT = ("stack: plain HTML/CSS/JS in a few files (index.html, style.cs
 UNATTENDED = "This is an unattended run: nobody can answer questions. Decide everything yourself and list your assumptions."
 
 
-def _answer_direct(run, spec, lctx, keys):
+def _answer_direct(run, spec, lctx, keys, att=''):
     """A plain question: one short call, no planner, no agents. Searches the web first when the question is
     about something recent (or the user asked for it) and a Tavily key is available."""
     system, prompt, sources, note = ANSWER_SYSTEM, run.goal, [], ''
+    if att:
+        system += (' The user attached files (see ATTACHED FILES). Answer from them. You cannot see pictures: for a picture you only have OCR text '
+                   'and basic facts, so say so if asked about how it looks.')
+        prompt = f'{att}\n\nQUESTION: {run.goal}'
     tkey = (keys or {}).get('tavily', '')
     if tkey and (run.web_search or search.needs_search(run.goal)):
         try:
             found = search.search(run.goal, tkey, ctx=dict(lctx, purpose='search'))['results']
             if found:
                 system = ANSWER_SYSTEM_WEB
-                prompt = f'WEB SOURCES:\n{search.format_sources(found)}\n\nQUESTION: {run.goal}'
+                prompt = (f'{att}\n\n' if att else '') + f'WEB SOURCES:\n{search.format_sources(found)}\n\nQUESTION: {run.goal}'
                 sources = [{'title': r['title'], 'url': r['url']} for r in found]
         except search.SearchError as e:
             note = f'\n\n(Web search was unavailable: {e} This answer is from my built-in knowledge and may be out of date.)'
@@ -399,9 +403,13 @@ def _coordinate(run_id, feedback=''):
             ctx = _run_keys.get(run_id, {'keys': {}, 'memory': ''})
         # ── 0. route with plain code (zero tokens), forecast the cost ──
         lctx = {'owner': run.owner, 'run_id': run_id}
+        uploads = [u for u in (files.UploadDocument.objects(upload_id=a['id']).first() for a in run.attachments) if u]
+        att = files.prompt_block(uploads)
         kind = run.kind
         if not kind:
             kind = router.classify(run.goal)
+            if uploads and kind == 'auto':
+                kind = 'chat'   # "summarize this" with a file attached is a question about the file
             if run.mode == 'edit' and kind != 'chat':
                 kind = 'edit'
             fc = router.forecast(run.goal, kind, verify=run.verify, web_search=run.web_search)
@@ -414,7 +422,7 @@ def _coordinate(run_id, feedback=''):
             clar = (clar + '\n' + UNATTENDED).strip()
         try:
             if kind == 'chat':
-                return _answer_direct(run, pspec, lctx, ctx['keys'])
+                return _answer_direct(run, pspec, lctx, ctx['keys'], att)
             if kind == 'pc':   # something to do on the user's PC: hand over to the PC engine (it asks before changing anything)
                 from .pc import engine as pc_engine
                 tid = pc_engine.start_task(run.goal, run.owner, ctx['keys'], run_id=run_id)
@@ -423,7 +431,7 @@ def _coordinate(run_id, feedback=''):
             if kind == 'small':   # one agent builds it at the project root; no planner, critic or review
                 plan, ti, to = {'project_name': run.goal[:60], 'summary': run.goal[:240], 'contract': SMALL_CONTRACT,
                                 'assumptions': [], 'modules': [{'key': 'app', 'title': 'Build ' + run.goal[:70],
-                                                                'description': run.goal, 'folder': '', 'depends_on': [],
+                                                                'description': run.goal + (f'\n\n{att[:6000]}' if att else ''), 'folder': '', 'depends_on': [],
                                                                 'expects': []}]}, 0, 0
             else:
                 edit = None
@@ -441,7 +449,7 @@ def _coordinate(run_id, feedback=''):
                 deep = (run.deep_plan and kind in ('large', 'auto') and not edit and pspec['model'] == 'deepseek-chat'
                         and router.is_hard(run.goal))
                 args = dict(ctx=lctx, clarifications=clar, feedback=feedback, previous_plan=run.plan if feedback else None,
-                            edit=edit, example=example, critic_spec=pspec)
+                            edit=edit, example=example, critic_spec=pspec, attachments=att)
                 plan = None
                 if deep:   # big, multi-part goal: the reasoner plans it (slower, better architecture)
                     try:
@@ -480,6 +488,9 @@ def _build_from_plan(run_id, plan):
     """Turn an (approved) plan into the agent map and run it."""
     try:
         run = RunDocument.objects.get(run_id=run_id)
+        provided = files.copy_assets([u for u in (files.UploadDocument.objects(upload_id=a['id']).first() for a in run.attachments) if u], run.target_path)
+        if provided:   # every agent sees the real files that are already in the project
+            plan['contract'] = (plan['contract'] + '\nprovided_files (already in the project, use these exact paths): ' + '; '.join(provided)).strip()
         RunDocument.objects(run_id=run_id).update_one(
             set__project_name=plan['project_name'], set__summary=plan['summary'], set__contract=plan['contract'],
             set__assumptions=plan.get('assumptions', []), set__status='running', set__plan={})

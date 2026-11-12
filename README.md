@@ -73,6 +73,7 @@ goal such as *"a CRM with a dashboard, pipeline board and contacts"* (planner, p
 - **Browser check** opens the finished site in a headless browser, finds errors, 404s and broken buttons, and has an
   agent fix them. You can also **Preview the site** inside Adion and **Change this project** afterwards.
 - **Usage tab** shows cost, tokens, cache savings and forecasts before you run anything.
+- **Attachments**: click **Attach** or drag files into the box (documents, PDFs, spreadsheets as CSV, pictures). Adion reads the text (scanned pages and pictures by free local OCR) and can use pictures and data files in a build. It cannot *see* pictures, only the text in them.
 - **PC control** (admin): say or type "open Spotify", "find my invoices on the desktop", "move these into a folder", "how much disk space is left". Only the Desktop is open by default, any other folder asks first, changes and deletes need your approval, and everything can be undone and is logged. See the **PC** tab for the pause switch, trust mode and allowed folders.
 - **Voice**: click the mic or press `Alt+V`. Say "Adion" to wake it. Needs Chrome or Edge.
 

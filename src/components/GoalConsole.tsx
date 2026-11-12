@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { Mic, MicOff, ArrowUp, Square, Loader2, FolderOpen, SlidersHorizontal, ChevronDown, Pencil, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Mic, MicOff, ArrowUp, Square, Loader2, FolderOpen, SlidersHorizontal, ChevronDown, Pencil, X, Paperclip, FileText, Image as ImageIcon } from 'lucide-react';
 import VoiceOrb from '@/components/VoiceOrb';
 import { useApp } from '@/context/AppContext';
 import { useVoice } from '@/context/VoiceContext';
-import { api, fmtCost, fmtTokens, type Forecast } from '@/lib/api';
+import { api, fmtCost, fmtTokens, ATTACH_ACCEPT, type Forecast } from '@/lib/api';
 
 const KIND: Record<Forecast['kind'], string> = { chat: 'quick answer', pc: 'PC task', small: 'small build, 1 agent', large: 'full build', auto: 'full build' };
 
@@ -17,28 +17,32 @@ function greeting(): string {
 const field = 'w-full rounded-lg bg-slate-950/80 border border-slate-800 px-2.5 py-1.5 text-xs outline-none focus:border-cyan-500 transition';
 
 export default function GoalConsole() {
-  const { settings, updateSettings, startRun, cancelRun, snap, starting, error, clearError, goal, setGoal, user, continueFrom, setContinueFrom, runs } = useApp();
+  const { settings, updateSettings, startRun, cancelRun, snap, starting, error, clearError, goal, setGoal, user, continueFrom, setContinueFrom, runs, attachments, uploading, addFiles, removeAttachment } = useApp();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
   const { isVoiceActive, isThinking, isSpeaking, voiceTranscript, voiceError, toggleVoiceListening,
     isAutoProcessVoice, toggleAutoProcessVoice } = useVoice();
   const [showOptions, setShowOptions] = useState(false);
   const [fc, setFc] = useState<Forecast | null>(null);
   const [fcFor, setFcFor] = useState('');
   useEffect(() => {
-    const g = goal.trim();
+    const g = goal.trim() || (attachments.length ? 'Summarize the attached file' : '');
     if (!g) return;
+    const ids = attachments.map(a => a.id);
     const t = setTimeout(() => {
-      api<Forecast>('/usage/estimate', { method: 'POST', json: { goal: g, verify: settings.verify, webSearch: settings.webSearch } })
+      api<Forecast>('/usage/estimate', { method: 'POST', json: { goal: g, verify: settings.verify, webSearch: settings.webSearch, attachments: ids } })
         .then(f => { setFc(f); setFcFor(g); }).catch(() => setFc(null));
     }, 500);
     return () => clearTimeout(t);
-  }, [goal, settings.verify, settings.webSearch]);
-  const forecast = goal.trim() && fc && fcFor === goal.trim() ? fc : null;
+  }, [goal, attachments, settings.verify, settings.webSearch]);
+  const effectiveGoal = goal.trim() || (attachments.length ? 'Summarize the attached file' + (attachments.length > 1 ? 's' : '') : '');
+  const forecast = effectiveGoal && fc && fcFor === (goal.trim() || (attachments.length ? 'Summarize the attached file' : '')) ? fc : null;
   const active = !!snap && ['planning', 'running', 'awaiting_input', 'awaiting_approval'].includes(snap.run.status);
   const editing = continueFrom ? (runs.find(r => r.id === continueFrom)?.projectName || snap?.run.projectName || 'this project') : '';
   const orbActive = isVoiceActive || isThinking || isSpeaking || active;
   const text = isVoiceActive && voiceTranscript ? voiceTranscript : goal;
 
-  const submit = () => { if (goal.trim() && !active) startRun(goal.trim()); };
+  const submit = () => { if (effectiveGoal && !active) startRun(effectiveGoal); };
   const summary = [
     settings.targetPath,
     `${settings.plannerModel} → ${settings.workerModel}`,
@@ -67,16 +71,38 @@ export default function GoalConsole() {
         </div>
       )}
       {/* Composer */}
-      <div className={`mt-5 rounded-2xl border bg-slate-950/70 transition ${isVoiceActive ? 'border-rose-500/60 shadow-[0_0_30px_-8px_rgba(244,63,94,0.5)]' : 'border-slate-800 focus-within:border-cyan-500/70'}`}>
+      <div onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
+        onDrop={e => { e.preventDefault(); setDragging(false); addFiles(Array.from(e.dataTransfer.files)); }}
+        className={`mt-5 rounded-2xl border bg-slate-950/70 transition ${dragging ? 'border-cyan-400 bg-cyan-500/5' : isVoiceActive ? 'border-rose-500/60 shadow-[0_0_30px_-8px_rgba(244,63,94,0.5)]' : 'border-slate-800 focus-within:border-cyan-500/70'}`}>
         <textarea
           value={text}
           onChange={e => setGoal(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(); }}
           rows={3}
-          placeholder={editing ? 'Describe the change you want…' : 'Describe the app you want, or press the mic and just talk to Adion…'}
+          placeholder={attachments.length ? 'Ask about the attached file, or say what to build with it…' : editing ? 'Describe the change you want…' : 'Describe the app you want, attach a file, or press the mic and talk to Adion…'}
           className="w-full resize-none bg-transparent px-4 pt-3 text-sm outline-none placeholder:text-slate-600"
         />
+        {(attachments.length > 0 || uploading) && (
+          <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+            {attachments.map(a => (
+              <span key={a.id} title={a.note || a.name}
+                className="flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900 pl-2 pr-1 py-0.5 text-[11px] text-slate-300">
+                {a.kind === 'image' ? <ImageIcon className="h-3 w-3 text-cyan-300" /> : <FileText className="h-3 w-3 text-slate-400" />}
+                <span className="max-w-[10rem] truncate">{a.name}</span>
+                <span className="text-slate-500">{a.kind === 'image' ? (a.chars > 0 ? 'OCR' : `${a.info.width}×${a.info.height}`) : `${Math.max(1, Math.round(a.size / 1024))} KB`}</span>
+                <button onClick={() => removeAttachment(a.id)} title="Remove" className="rounded-full p-0.5 hover:bg-slate-700"><X className="h-3 w-3" /></button>
+              </span>
+            ))}
+            {uploading && <span className="flex items-center gap-1.5 text-[11px] text-slate-500"><Loader2 className="h-3 w-3 animate-spin" /> reading file…</span>}
+          </div>
+        )}
         <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
+          <input ref={fileRef} type="file" multiple accept={ATTACH_ACCEPT} className="hidden"
+            onChange={e => { addFiles(Array.from(e.target.files || [])); e.target.value = ''; }} />
+          <button onClick={() => fileRef.current?.click()} title="Attach files (documents, PDFs, pictures; drag and drop works too)"
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition">
+            <Paperclip className="h-3.5 w-3.5" /> Attach
+          </button>
           <button onClick={() => setShowOptions(o => !o)}
             className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition">
             <SlidersHorizontal className="h-3.5 w-3.5" /> Options
@@ -93,7 +119,7 @@ export default function GoalConsole() {
                 <Square className="h-3.5 w-3.5 fill-current" />
               </button>
             ) : (
-              <button onClick={submit} disabled={!goal.trim() || starting} title="Build it"
+              <button onClick={submit} disabled={!effectiveGoal || starting || uploading} title="Send"
                 className="h-9 w-9 rounded-full bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-800 disabled:text-slate-600 text-slate-950 flex items-center justify-center transition">
                 {starting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
               </button>

@@ -5,7 +5,7 @@ import time
 from flask import Blueprint, request, jsonify, Response, stream_with_context
 
 from models import RunDocument, AgentTaskDocument
-from orchestrator import engine
+from orchestrator import engine, files
 from auth import path_allowed, current_user, is_admin, with_stored_key, make_preview_token
 from routes.memory import recall
 
@@ -51,6 +51,10 @@ def start_run():
         return jsonify({'error': 'targetPath is required'}), 400
     if not path_allowed(target):
         return jsonify({'error': 'targetPath is outside the allowed folders (set ALLOWED_ROOTS on the server)'}), 403
+    try:
+        ups = files.get_many(b.get('attachments'), current_user()['u'])
+    except files.FileError as e:
+        return jsonify({'error': str(e)}), 400
     cont = (b.get('continueRunId') or '').strip()
     if cont:   # a follow-up change must target a project this user may modify, inside an allowed folder
         parent, err = _get(cont, modify=True)
@@ -63,7 +67,8 @@ def start_run():
         b.get('maxTokens') or 0, source=b.get('source', 'manual'), memory=recall(goal),
         owner=current_user()['u'], verify_run=bool(b.get('verify')), web_search=bool(b.get('webSearch')),
         review_plan=bool(b.get('reviewPlan')), continue_from=cont,
-        deep_plan=b.get('deepPlan', True) is not False)
+        deep_plan=b.get('deepPlan', True) is not False,
+        attachments=[{'id': u.upload_id, 'name': u.name, 'kind': u.kind} for u in ups])
     return jsonify(run.to_dict()), 201
 
 

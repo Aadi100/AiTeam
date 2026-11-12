@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { api, ApiError, getToken, setToken, streamUrl, type Run, type Snapshot, type User } from '@/lib/api';
+import { api, ApiError, getToken, setToken, streamUrl, MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, type Run, type Snapshot, type Upload, type User } from '@/lib/api';
 
 export interface Settings {
   targetPath: string; plannerModel: string; workerModel: string; maxTokens: number; autoRun: boolean; verify: boolean; webSearch: boolean; reviewPlan: boolean; deepPlan: boolean; v: number;
@@ -21,6 +21,7 @@ interface Ctx {
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   settings: Settings;
+  attachments: Upload[]; uploading: boolean; addFiles: (files: File[]) => Promise<void>; removeAttachment: (id: string) => void;
   pcTaskId: string; setPcTaskId: (id: string) => void; pcVersion: number; refreshPc: () => void;
   continueFrom: string; setContinueFrom: (id: string) => void;
   answerQuestions: (answers: Record<string, string>) => Promise<void>;
@@ -58,6 +59,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [continueFrom, setContinueFrom] = useState('');
   const [pcTaskId, setPcTaskId] = useState('');
+  const [attachments, setAttachments] = useState<Upload[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [pcVersion, setPcVersion] = useState(0);
   const refreshPc = useCallback(() => setPcVersion(v => v + 1), []);
   const [panel, setPanel] = useState<Panel>('runs');
@@ -160,15 +163,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         json: {
           goal, targetPath: settings.targetPath, source, verify: settings.verify, webSearch: settings.webSearch,
           reviewPlan: settings.reviewPlan, deepPlan: settings.deepPlan, continueRunId: continueFrom || undefined,
+          attachments: attachments.map(a => a.id),
           plannerModel: settings.plannerModel, workerModel: settings.workerModel, maxTokens: settings.maxTokens,
         },
       });
       setPanel('runs');
       setContinueFrom('');
+      setAttachments([]);
       watch(run.id);
       refreshRuns();
     } catch (e) { handleErr(e); } finally { setStarting(false); }
-  }, [settings, continueFrom, watch, refreshRuns, handleErr]);
+  }, [settings, continueFrom, attachments, watch, refreshRuns, handleErr]);
 
   const cancelRun = useCallback(async () => {
     if (!snap) return;
@@ -184,6 +189,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       watch(snap.run.id);
     } catch (e) { handleErr(e); }
   }, [snap, watch, handleErr]);
+
+  const addFiles = useCallback(async (files: File[]) => {
+    setUploading(true);
+    let count = attachments.length;
+    for (const f of files) {
+      if (count >= MAX_ATTACHMENTS) { setError(`At most ${MAX_ATTACHMENTS} files per request.`); break; }
+      if (f.size > MAX_UPLOAD_BYTES) { setError(`${f.name} is larger than 10 MB.`); continue; }
+      try {
+        const fd = new FormData();
+        fd.append('file', f);
+        const up = await api<Upload>('/files', { method: 'POST', body: fd });
+        setAttachments(a => [...a, up]);
+        count++;
+      } catch (e) { setError(`${f.name}: ${e instanceof Error ? e.message : 'upload failed'}`); }
+    }
+    setUploading(false);
+  }, [attachments.length]);
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments(a => a.filter(x => x.id !== id));
+    api(`/files/${id}`, { method: 'DELETE' }).catch(() => { /* already gone */ });
+  }, []);
 
   // resume a paused run: the server returns the fresh snapshot; keep watching it
   const resume = useCallback(async (path: string, json: unknown) => {
@@ -202,7 +228,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppCtx.Provider value={{
-      pcTaskId, setPcTaskId, pcVersion, refreshPc, continueFrom, setContinueFrom, answerQuestions, approvePlan, revisePlan, rejectPlan,
+      attachments, uploading, addFiles, removeAttachment, pcTaskId, setPcTaskId, pcVersion, refreshPc, continueFrom, setContinueFrom, answerQuestions, approvePlan, revisePlan, rejectPlan,
       authed, user, login, retryTask, goal, setGoal, logout, settings, updateSettings, settingsOpen, setSettingsOpen, panel, setPanel,
       snap, runs, refreshRuns, startRun, openRun: watch, cancelRun, starting, error,
       clearError: () => setError(''), selectedTaskId, selectTask,

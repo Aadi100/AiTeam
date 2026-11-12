@@ -79,11 +79,21 @@ Adion can look at and operate your PC through a fixed set of tools (`backend/orc
 - **Not built:** typing/mouse control, reading the screen, reading pictures or scanned PDFs, email and calendar.
 - Tests: `backend/tests/test_pc.py` runs in a throwaway fake home with the OS hooks (open, volume, lock) replaced, so nothing real is touched.
 
+## Attachments (files and pictures)
+- **Attach** in the composer (or drag and drop): text/code, CSV/JSON, PDF, Word (.docx) and pictures (png, jpg, gif, bmp, webp). Up to 5 files of 10 MB per request. Programs and unknown types are refused.
+- **What Adion gets:** the extracted text. Scanned PDFs and pictures are read with free, local OCR (RapidOCR, no key, nothing leaves the PC). Pictures also give size, format and main colours.
+- **Honest limit:** DeepSeek cannot see pictures. Adion only knows the text OCR found plus basic facts, and tells the model so. Understanding a mockup or photo needs a vision model (not added).
+- **Questions:** "summarize this" with a file attached is answered from the file. **Builds:** the planner sees the files; pictures are copied to `assets/` and CSV/JSON to `data/` inside the project, and every agent is told the exact paths, sizes and colours.
+- **Safety:** extracted text is labelled as data and never followed as instructions. Uploads are private to their owner and stored under `~/.adion/uploads` (override with `ADION_UPLOADS`).
+- **PC control** can also read pictures and scanned PDFs on your PC by OCR.
+- Tests: `backend/tests/test_files.py` (uses the real OCR engine).
+
 ## Known limits
 - Adion uses DeepSeek only (`deepseek-chat`, or slower `deepseek-reasoner`). No local models. It is a paid cloud API, so keep a token budget set.
 - Run-and-fix executes generated Python on your machine. It is opt-in per run, and the child process gets no API keys or
   database URI, but it is not a container. Only Python/Flask entry points are smoke-tested.
 - Memory recall is keyword-based (DeepSeek has no embeddings API).
+- Not built: image understanding (needs a vision model), generating images, Excel (.xlsx) files.
 - Stored schedule keys are encrypted with a secret kept in `backend/.auth.json` on the same machine. That protects a database
   leak, not someone with access to the whole folder.
 - Adion's wake word and speech recognition need Chrome or Edge (Web Speech). Other browsers get push-to-talk via Whisper (needs an OpenAI key). The wake word listens only while the tab is open, and speech engines can mishear the made-up name, so several spellings are accepted.

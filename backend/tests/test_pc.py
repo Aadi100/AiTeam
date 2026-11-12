@@ -107,7 +107,7 @@ check('T3: search by extension', 'notes.md' in run('search_files', ext='md')['te
 check('T4: search inside file text', 'Invoice March.txt' in run('search_files', text_contains='120 EUR')['text'] and 'notes.md' not in run('search_files', text_contains='120 EUR')['text'])
 check('T5: search by date', 'invoice-2026-03.txt' not in run('search_files', modified_after=time.strftime('%Y-%m-%d', time.localtime(time.time() - 7 * 86400)))['text'])
 check('T6: read txt and docx', 'total due 120 EUR' in run('read_file', path='Invoice March.txt')['text'] and 'Ada Lovelace' in run('read_file', path='resume.docx')['text'])
-for label, args, word in [('picture', {'path': 'pic.png'}, 'binary'), ('secret', {'path': '.env'}, 'Blocked'), ('other folder', {'path': os.path.join(DOCS, 'x.txt')}, 'permission')]:
+for label, args, word in [('broken picture', {'path': 'pic.png'}, 'Could not open the picture'), ('secret', {'path': '.env'}, 'Blocked'), ('other folder', {'path': os.path.join(DOCS, 'x.txt')}, 'permission')]:
     try:
         run('read_file', **args); ok = False; msg = ''
     except tools.ToolError as e:

@@ -227,7 +227,7 @@ def search_files(ctx, a):
     return {'ok': True, 'text': f'{len(hits)} match(es) in {real}' + (f' (showing {limit})' if len(hits) > limit else '') + ':\n' + '\n'.join(lines)}
 
 
-@tool('read_file', 'Read the text of a file (txt, md, csv, json, code, PDF, Word). Pictures cannot be read yet.',
+@tool('read_file', 'Read the text of a file (txt, md, csv, json, code, PDF, Word). For pictures and scanned PDFs it reads the text in them with OCR (it cannot see what a picture looks like).',
       {'path': 'file', 'max_chars': 'default 6000'}, 'read', paths=lambda a: [(a.get('path'), False)], preview=lambda a: f'Read {a.get("path")}')
 def read_file(ctx, a):
     real = _real(ctx, a.get('path'))
@@ -235,12 +235,25 @@ def read_file(ctx, a):
         raise ToolError(f'{real} is not a file.')
     cap = min(int(a.get('max_chars') or 6000), MAX_READ)
     ext = os.path.splitext(real)[1].lower()
+    if ext in ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'):
+        from orchestrator import files
+        try:
+            info = files.image_info(real)
+        except Exception as e:  # noqa: BLE001
+            raise ToolError(f'Could not open the picture: {e}')
+        ocr = files.ocr_image(real).strip()
+        head = (f"Picture {info['width']}x{info['height']} {info['format']}, main colours " + ', '.join(c['hex'] for c in info['colors'][:4])
+                + '. I cannot see the picture itself, only the text OCR found: ')
+        return {'ok': True, 'text': head + (ocr[:cap] if ocr else '(no text found)')}
     if ext == '.pdf':
         try:
             from pypdf import PdfReader
             text = '\n'.join((p.extract_text() or '') for p in PdfReader(real).pages[:20])
         except Exception as e:  # noqa: BLE001
             raise ToolError(f'Could not read the PDF: {e}')
+        if len(text.strip()) < 40:   # scanned PDF: read the first pages with OCR
+            from orchestrator import files
+            text = files._ocr_pdf(real) or text
     elif ext == '.docx':
         try:
             import docx
@@ -251,13 +264,13 @@ def read_file(ctx, a):
         with open(real, 'rb') as fh:
             raw = fh.read(cap * 4 + 1)
         if b'\x00' in raw[:2000]:
-            raise ToolError('This is a binary file (picture, program or archive). I can only read text, PDF and Word files for now.')
+            raise ToolError('This is a binary file (program or archive). I can read text, PDF, Word files and pictures (by OCR).')
         text = raw.decode('utf-8', errors='replace')
     else:
         raise ToolError('I can only read text, PDF and Word files for now.')
     text = text.strip()
     if not text:
-        raise ToolError('The file has no readable text (a scanned PDF needs picture/OCR support, which is not built yet).')
+        raise ToolError('The file has no readable text, even with OCR.')
     return {'ok': True, 'text': text[:cap] + ('\n...[cut]' if len(text) > cap else '')}
 
 

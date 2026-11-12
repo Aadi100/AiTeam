@@ -67,4 +67,11 @@ def estimate():
     goal = (b.get('goal') or '').strip()
     if not goal:
         return jsonify({'error': 'goal is required'}), 400
-    return jsonify(router.forecast(goal, verify=bool(b.get('verify')), web_search=bool(b.get('webSearch'))))
+    extra = 0
+    try:
+        from orchestrator import files, llm
+        extra = sum(llm.count_tokens(files.prompt_block([u]))
+                    for u in files.get_many(b.get('attachments'), current_user()['u']))
+    except Exception:  # noqa: BLE001 - a forecast must never fail
+        extra = 0
+    return jsonify(router.forecast(goal, verify=bool(b.get('verify')), web_search=bool(b.get('webSearch')), extra_tokens=extra))

@@ -24,6 +24,7 @@ class RunDocument(me.Document):
     deep_plan = me.BooleanField(default=True)      # plan big projects with the slower, smarter reasoner model
     reused_plan = me.StringField(default='')       # name of an earlier good plan this one was modelled on
     pc_task_id = me.StringField(default='')        # a PC-control request started from the composer
+    attachments = me.ListField(me.DictField(), default=list)   # [{id, name, kind}] files given with the goal
     questions = me.ListField(me.DictField(), default=list)  # [{id, q, options, answer, taskId}] asked of the user
     plan = me.DictField(default=dict)              # plan waiting for approval
     assumptions = me.ListField(me.StringField(), default=list)
@@ -59,7 +60,7 @@ class RunDocument(me.Document):
             'summary': self.summary, 'answer': self.answer, 'sources': self.sources,
             'kind': self.kind, 'mode': self.mode, 'parentRunId': self.parent_run_id, 'reviewPlan': self.review_plan,
             'questions': self.questions, 'plan': self.plan, 'assumptions': self.assumptions,
-            'deepPlan': self.deep_plan, 'reusedPlan': self.reused_plan, 'pcTaskId': self.pc_task_id,
+            'deepPlan': self.deep_plan, 'reusedPlan': self.reused_plan, 'pcTaskId': self.pc_task_id, 'attachments': self.attachments,
             'revisions': self.revisions, 'check': self.check, 'targetPath': self.target_path, 'status': self.status,
             'plannerModel': self.planner_model, 'workerModel': self.worker_model,
             'maxTokens': self.max_tokens, 'tokensIn': self.tokens_in, 'tokensOut': self.tokens_out,
@@ -86,6 +87,26 @@ class PlanMemoryDocument(me.Document):
     created_at = me.DateTimeField(default=datetime.utcnow)
 
     meta = {'collection': 'plan_memory', 'indexes': ['owner', '-created_at']}
+
+
+class UploadDocument(me.Document):
+    """A file the user attached. The original is stored on disk; the extracted text is kept here."""
+    upload_id = me.StringField(unique=True, required=True)
+    owner = me.StringField(required=True)
+    name = me.StringField(required=True)
+    kind = me.StringField(default='text')          # text | pdf | docx | image
+    size = me.IntField(default=0)
+    path = me.StringField(default='')
+    text = me.StringField(default='')              # extracted text (or OCR text)
+    info = me.DictField(default=dict)              # image size/colours, pdf pages
+    note = me.StringField(default='')              # honest limits, e.g. "scanned PDF read with OCR"
+    created_at = me.DateTimeField(default=datetime.utcnow)
+
+    meta = {'collection': 'uploads', 'indexes': ['upload_id', 'owner', '-created_at']}
+
+    def to_dict(self):
+        return {'id': self.upload_id, 'name': self.name, 'kind': self.kind, 'size': self.size, 'info': self.info,
+                'note': self.note, 'chars': len(self.text or '')}
 
 
 class PcSettingsDocument(me.Document):

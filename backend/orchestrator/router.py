@@ -96,10 +96,10 @@ def _row(tin, hit_share, tout):
     return {'in': tin, 'out': tout, 'hit': hit, 'cost': cost_usd(hit, tin - hit, tout)}
 
 
-def forecast(goal, kind=None, module_descs=None, contract_text=None, verify=False, web_search=False):
+def forecast(goal, kind=None, module_descs=None, contract_text=None, verify=False, web_search=False, extra_tokens=0):
     """Returns {kind, modules, tokens, low, high, cost, costLow, costHigh, parts:[{name,tokens,cost}]}."""
     kind = kind or classify(goal)
-    g = count_tokens(goal)
+    g = count_tokens(goal) + int(extra_tokens or 0)
     parts = []
     if kind == 'chat':
         web = needs_search(goal) or web_search

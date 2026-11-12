@@ -109,6 +109,7 @@ export default function AgentMap() {
           <span className="h-2 w-2 rounded-full bg-emerald-400" /> Adion · {fmtTokens(run.tokens)} tokens · {fmtCost(run.cost)}
         </div>
         <p className="mt-1 text-sm text-slate-400">{run.goal}</p>
+        {run.attachments?.length > 0 && <p className="mt-1 text-[11px] text-slate-500">Attached: {run.attachments.map(a => a.name).join(', ')}</p>}
         <div className="mt-3 text-sm text-slate-100 leading-relaxed whitespace-pre-wrap">
           {run.answer}{!['completed', 'failed', 'cancelled'].includes(run.status) && <span className="inline-block w-1.5 h-4 -mb-0.5 ml-0.5 bg-cyan-400 animate-pulse" />}
         </div>
@@ -153,6 +154,7 @@ export default function AgentMap() {
             )}
             <div className="hidden lg:block absolute top-1/2 -right-6 w-6 h-px bg-slate-700" />
           </div>
+          {run.attachments?.length > 0 && <p className="mt-2 text-[11px] text-slate-500">Attached: {run.attachments.map(a => a.name).join(', ')}</p>}
           {run.summary && <p className="mt-3 text-xs text-slate-400 leading-relaxed">{run.summary}</p>}
           {run.reusedPlan && <p className="mt-1 text-[11px] text-violet-300/90">Modelled on your earlier plan: {run.reusedPlan}</p>}
           {run.plannerModel === 'deepseek-reasoner' && <p className="mt-1 text-[11px] text-slate-500">Planned with deep reasoning</p>}

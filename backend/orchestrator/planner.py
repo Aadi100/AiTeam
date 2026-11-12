@@ -157,7 +157,7 @@ def _brief(plan):
 
 
 def make_plan(spec, goal, memory_notes='', existing_files=None, ctx=None, clarifications='', feedback='',
-              previous_plan=None, edit=None, example='', critic_spec=None):
+              previous_plan=None, edit=None, example='', critic_spec=None, attachments=''):
     """Returns (plan_dict, tokens_in, tokens_out). Raises LLMError if no usable plan.
     plan has 'answer' (a direct answer), 'questions' (goal too vague) or 'modules' (a build).
     clarifications: the user's answers to earlier questions. feedback + previous_plan: revise a plan the user reviewed.
@@ -167,6 +167,8 @@ def make_plan(spec, goal, memory_notes='', existing_files=None, ctx=None, clarif
     if edit:
         prompt += (f"\nEXISTING PROJECT:\nsummary: {edit.get('summary', '')}\ncontract:\n{str(edit.get('contract', ''))[:2500]}\n"
                    f"files:\n" + '\n'.join((edit.get('tree') or [])[:80]) + '\n')
+    if attachments:
+        prompt += f'\n{attachments}\n'
     if clarifications:
         prompt += f'\nCLARIFICATIONS (the user answered your questions; do NOT ask again, build now):\n{clarifications}\n'
     if previous_plan and feedback:
