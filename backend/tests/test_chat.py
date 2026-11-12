@@ -123,9 +123,10 @@ ask('what year was she born', thread='th_other')
 check('I1: another conversation does not see this one', 'CONVERSATION SO FAR' not in answer_prompt()[2])
 ask('what year was she born', thread='th_one', owner='mem')
 check('I2: another user with the same thread id does not see it', 'CONVERSATION SO FAR' not in answer_prompt()[2])
-RunDocument.objects(thread_id='th_one').update(set__created_at=datetime.utcnow() - timedelta(hours=3))
-ask('go read its real information', thread='th_one')
-check('I3: turns older than 90 minutes are forgotten', not any('CONVERSATION SO FAR' in x[2] for x in calls) and len(calls) > 0, str(calls))
+RunDocument.objects(thread_id='th_one').update(set__created_at=datetime.utcnow() - timedelta(days=3))
+S['answers'] = ['Reopened answer.']
+ask('what year was she born', thread='th_one')
+check('I3: a conversation reopened days later still remembers (threads are explicit now)', 'User: who is mia malkova' in answer_prompt()[2], answer_prompt()[2][:300])
 calls.clear(); ask('I want an app', thread='th_fresh')
 check('I5: a vague message in an EMPTY thread is not forced into chat', any(x[0] == 'plan' for x in calls), str([x[0] for x in calls]))
 

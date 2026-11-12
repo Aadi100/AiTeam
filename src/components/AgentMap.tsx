@@ -61,7 +61,7 @@ function TaskCard({ t, nameOf, now, selected, onClick }: {
 }
 
 export default function AgentMap() {
-  const { snap, selectedTaskId, selectTask, cancelRun, user, setPanel, setGoal, setContinueFrom, runs } = useApp();
+  const { snap, selectedTaskId, selectTask, cancelRun, user, setPanel, setGoal, setContinueFrom, threadRuns } = useApp();
   const live = !!snap && (['planning', 'running'].includes(snap.run.status) ||
     snap.tasks.some(t => t.status === 'running'));
   const paused = !!snap && ['awaiting_input', 'awaiting_approval'].includes(snap.run.status);
@@ -104,8 +104,8 @@ export default function AgentMap() {
 
   if (run.answer) {
     // earlier turns of the same conversation, oldest first
-    const prev = run.threadId ? runs.filter(r => r.threadId === run.threadId && r.id !== run.id && r.answer && (r.createdAt || '') < (run.createdAt || ''))
-      .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')) : [];
+    const prev = threadRuns.filter(r => r.id !== run.id && (r.answer || r.pcTaskId) && (r.createdAt || '') < (run.createdAt || ''))
+      .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
     return (
       <div className="space-y-3">
         {prev.map(r => (
@@ -113,7 +113,7 @@ export default function AgentMap() {
             <p className="text-[11px] uppercase tracking-wider text-slate-500">You</p>
             <p className="text-sm text-slate-300 whitespace-pre-wrap">{r.goal}</p>
             <p className="mt-3 text-[11px] uppercase tracking-wider text-slate-500">Adion</p>
-            <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">{r.answer}</p>
+            {r.pcTaskId ? <div className="mt-1"><PcTaskCard taskId={r.pcTaskId} /></div> : <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">{r.answer}</p>}
             {r.sources?.length > 0 && <p className="mt-2 text-[11px] text-slate-500">Sources: {r.sources.map((s, i) => <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer" className="text-cyan-300/80 hover:underline mr-2">[{i + 1}] {s.title.slice(0, 40)}</a>)}</p>}
           </section>
         ))}

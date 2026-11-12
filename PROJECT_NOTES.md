@@ -89,7 +89,8 @@ Adion can look at and operate your PC through a fixed set of tools (`backend/orc
 - Tests: `backend/tests/test_files.py` (uses the real OCR engine).
 
 ## Chat and automatic search
-- **Conversations:** questions in the same chat share a thread. Follow-ups see the last 6 turns (within 90 minutes, same user) so "how old is he" works. A vague follow-up in a chat is treated as chat, not as a build. **New chat** starts a fresh thread. **Enter** sends, **Shift+Enter** adds a line, and the box empties after sending.
+- **Conversations:** questions in the same chat share a thread. Follow-ups see the last 6 turns (same user, no time limit; a reopened old chat keeps its memory) so "how old is he" works.
+- **Chats sidebar:** the first tab lists one entry per conversation (title = first question, message count, time); click to reopen and continue, trash icon (two clicks) to delete. Builds are listed separately under Projects and are never deleted with a chat. Questions asked before chats existed show up as one-message chats. API: `GET /api/chats`, `GET/DELETE /api/chats/<id>`. A vague follow-up in a chat is treated as chat, not as a build. **New chat** starts a fresh thread. **Enter** sends, **Shift+Enter** adds a line, and the box empties after sending.
 - **Automatic search:** with a Tavily key saved, factual questions (who/what/when/where/how is..., news, "look up", "go read the real information") are searched on the web without any special words. Greetings and writing tasks (explain, write, translate, summarize) are not. One question = one search credit.
 - **Follow-up searches:** a vague message like "go read its real information" is rewritten into a real search query using the conversation, so the search is about the right person or topic.
 - **No key:** Adion answers from what it knows and says plainly that adding a free Tavily key lets it look the answer up.

@@ -16,6 +16,7 @@ import time
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
+from mongoengine import Q
 from models import RunDocument, AgentTaskDocument
 from . import llm, planner, sandbox, worker, verify, router, search, plans, files
 
@@ -347,13 +348,13 @@ SMALL_CONTRACT = ("stack: plain HTML/CSS/JS in a few files (index.html, style.cs
 UNATTENDED = "This is an unattended run: nobody can answer questions. Decide everything yourself and list your assumptions."
 
 
-def _thread_history(run, limit=6, minutes=90):
-    """Earlier chat turns of this conversation (same thread, same user, recent), oldest first."""
+def _thread_history(run, limit=6):
+    """Earlier chat turns of this conversation (same thread, same user), oldest first. A reopened old chat keeps its memory.
+    Runs from before threads existed count as a one-turn conversation whose thread id is their run id."""
     if not run.thread_id:
         return []
-    since = _now() - timedelta(minutes=minutes)
-    prev = RunDocument.objects(thread_id=run.thread_id, owner=run.owner, status='completed', created_at__gte=since,
-                               run_id__ne=run.run_id).order_by('-created_at')[:limit]
+    prev = RunDocument.objects(Q(owner=run.owner) & Q(status='completed') & Q(run_id__ne=run.run_id)
+                               & (Q(thread_id=run.thread_id) | Q(run_id=run.thread_id))).order_by('-created_at')[:limit]
     return [(p.goal, p.answer) for p in reversed(list(prev)) if p.answer]
 
 

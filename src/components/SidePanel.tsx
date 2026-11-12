@@ -1,14 +1,14 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { History, Terminal, CalendarClock, Brain, Trash2, RotateCw, Square, Plus, Users, Coins, Laptop } from 'lucide-react';
+import { MessageSquare, Terminal, CalendarClock, Brain, Trash2, RotateCw, Square, Plus, Users, Coins, Laptop } from 'lucide-react';
 import UsagePanel from '@/components/UsagePanel';
 import PcPanel from '@/components/PcPanel';
 import { useApp, type Panel } from '@/context/AppContext';
 import { api, fmtTokens, type Job, type MemoryItem, type Role, type Run, type Schedule, type User } from '@/lib/api';
 
 const TABS: { id: Panel; label: string; icon: React.ReactNode; admin?: boolean }[] = [
-  { id: 'runs', label: 'Runs', icon: <History className="h-3.5 w-3.5" /> },
+  { id: 'runs', label: 'Chats', icon: <MessageSquare className="h-3.5 w-3.5" /> },
   { id: 'jobs', label: 'Background', icon: <Terminal className="h-3.5 w-3.5" />, admin: true },
   { id: 'schedules', label: 'Schedules', icon: <CalendarClock className="h-3.5 w-3.5" /> },
   { id: 'memory', label: 'Memory', icon: <Brain className="h-3.5 w-3.5" /> },
@@ -24,25 +24,67 @@ const STATUS_COLOR: Record<string, string> = {
   failed: 'text-rose-400', cancelled: 'text-slate-400', stopped: 'text-amber-400', lost: 'text-slate-500',
 };
 
+function ago(iso: string | null): string {
+  if (!iso) return '';
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return m < 1 ? 'just now' : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
+}
+
+/** Conversations (one entry per chat) and, separately, the projects Adion built. */
 function RunsList() {
-  const { runs, openRun, snap, refreshRuns } = useApp();
+  const { runs, chats, openRun, openChat, deleteChat, newChat, snap, refreshRuns } = useApp();
+  const [confirm, setConfirm] = useState('');
   useEffect(() => { refreshRuns(); }, [refreshRuns]);
-  if (!runs.length) return <p className="text-xs text-slate-500">No runs yet.</p>;
+  const activeChat = snap && (snap.run.answer || snap.run.pcTaskId) ? (snap.run.threadId || snap.run.id) : '';
+  const projects = runs.filter((r: Run) => !r.answer && !r.pcTaskId);
   return (
-    <ul className="space-y-1.5">
-      {runs.map((r: Run) => (
-        <li key={r.id}>
-          <button onClick={() => openRun(r.id)}
-            className={`w-full text-left rounded-lg border px-2.5 py-2 ${snap?.run.id === r.id ? 'border-cyan-500 bg-slate-800' : 'border-slate-800 hover:bg-slate-800/60'}`}>
-            <div className="text-xs truncate">{r.projectName || r.goal}</div>
-            <div className="text-[11px] font-mono text-slate-500">
-              <span className={STATUS_COLOR[r.status]}>{r.status.replace('_', ' ')}</span> · {fmtTokens(r.tokens)} tokens
-              {r.source !== 'manual' && ` · ${r.source}`}
-            </div>
-          </button>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-4">
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-[11px] uppercase tracking-wider text-slate-500">Chats</p>
+          <button onClick={newChat} className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300 hover:border-cyan-500 hover:text-cyan-200"><Plus className="h-3 w-3" /> New chat</button>
+        </div>
+        {chats.length === 0 ? <p className="text-xs text-slate-500">No chats yet. Ask Adion anything.</p> : (
+          <ul className="space-y-1.5">
+            {chats.map(g => (
+              <li key={g.threadId} className="group relative">
+                <button onClick={() => { setConfirm(''); openChat(g.threadId); }}
+                  className={`w-full text-left rounded-lg border px-2.5 py-2 pr-8 ${activeChat === g.threadId ? 'border-cyan-500 bg-slate-800' : 'border-slate-800 hover:bg-slate-800/60'}`}>
+                  <div className="text-xs truncate">{g.title}</div>
+                  <div className="text-[11px] text-slate-500 truncate">{g.count} message{g.count === 1 ? '' : 's'} · {ago(g.updatedAt)}</div>
+                </button>
+                {confirm === g.threadId ? (
+                  <button onClick={() => { setConfirm(''); deleteChat(g.threadId); }} title="Click again to delete this chat"
+                    className="absolute right-1.5 top-1.5 rounded bg-rose-600 px-1.5 py-0.5 text-[10px] text-white">Delete?</button>
+                ) : (
+                  <button onClick={() => setConfirm(g.threadId)} title="Delete this chat"
+                    className="absolute right-1.5 top-2 rounded p-1 text-slate-600 opacity-0 group-hover:opacity-100 hover:text-rose-300 focus:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div>
+        <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Projects</p>
+        {projects.length === 0 ? <p className="text-xs text-slate-500">Nothing built yet.</p> : (
+          <ul className="space-y-1.5">
+            {projects.map((r: Run) => (
+              <li key={r.id}>
+                <button onClick={() => openRun(r.id)}
+                  className={`w-full text-left rounded-lg border px-2.5 py-2 ${snap?.run.id === r.id ? 'border-cyan-500 bg-slate-800' : 'border-slate-800 hover:bg-slate-800/60'}`}>
+                  <div className="text-xs truncate">{r.projectName || r.goal}</div>
+                  <div className="text-[11px] font-mono text-slate-500">
+                    <span className={STATUS_COLOR[r.status]}>{r.status.replace('_', ' ')}</span> · {fmtTokens(r.tokens)} tokens
+                    {r.source !== 'manual' && ` · ${r.source}`}
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }
 

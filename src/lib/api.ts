@@ -100,6 +100,8 @@ export function fmtCost(usd: number): string {
   return '$' + usd.toFixed(usd < 1 ? 3 : 2);
 }
 
+export interface Chat { threadId: string; title: string; count: number; preview: string; updatedAt: string | null }
+
 export interface Upload {
   id: string; name: string; kind: 'text' | 'pdf' | 'docx' | 'image'; size: number; note: string; chars: number;
   info: { width?: number; height?: number; format?: string; pages?: number; colors?: { hex: string; share: number }[] };

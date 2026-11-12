@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { api, ApiError, getToken, setToken, streamUrl, MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, type Run, type Snapshot, type Upload, type User } from '@/lib/api';
+import { api, ApiError, getToken, setToken, streamUrl, MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, type Chat, type Run, type Snapshot, type Upload, type User } from '@/lib/api';
 
 export interface Settings {
   targetPath: string; plannerModel: string; workerModel: string; maxTokens: number; autoRun: boolean; verify: boolean; webSearch: boolean; reviewPlan: boolean; deepPlan: boolean; v: number;
@@ -21,7 +21,8 @@ interface Ctx {
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   settings: Settings;
-  threadId: string; newChat: () => void;
+  threadId: string; newChat: () => void; chats: Chat[]; threadRuns: Run[];
+  openChat: (threadId: string) => Promise<void>; deleteChat: (threadId: string) => Promise<void>;
   attachments: Upload[]; uploading: boolean; addFiles: (files: File[]) => Promise<void>; removeAttachment: (id: string) => void;
   pcTaskId: string; setPcTaskId: (id: string) => void; pcVersion: number; refreshPc: () => void;
   continueFrom: string; setContinueFrom: (id: string) => void;
@@ -63,6 +64,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // the conversation id is created on first use (in an event handler), never during render: it uses the clock
   const [threadId, setThreadId] = useState('');
   const threadRef = useRef('');
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [threadRuns, setThreadRuns] = useState<Run[]>([]);
   const [attachments, setAttachments] = useState<Upload[]>([]);
   const [uploading, setUploading] = useState(false);
   const [pcVersion, setPcVersion] = useState(0);
@@ -124,7 +127,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(() => { setToken(''); setAuthed(false); setUser(null); setSnap(null); }, []);
 
   const refreshRuns = useCallback(async () => {
-    try { setRuns(await api<Run[]>('/runs')); } catch (e) { handleErr(e); }
+    try { setRuns(await api<Run[]>('/runs')); setChats(await api<Chat[]>('/chats')); } catch (e) { handleErr(e); }
   }, [handleErr]);
 
   const stopWatching = useCallback(() => {
@@ -199,8 +202,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const newChat = useCallback(() => {
     stopWatching(); setSnap(null); setGoal(''); setAttachments([]); setContinueFrom('');
-    threadRef.current = ''; setThreadId('');
+    threadRef.current = ''; setThreadId(''); setThreadRuns([]);
   }, [stopWatching]);
+
+  // the turns of the open conversation (kept fresh while it changes)
+  useEffect(() => {
+    if (!threadId) return;
+    let alive = true;
+    api<Run[]>(`/chats/${threadId}`).then(r => { if (alive) setThreadRuns(r); }).catch(() => { if (alive) setThreadRuns([]); });
+    return () => { alive = false; };
+  }, [threadId, snap?.run.id, snap?.run.status]);
+
+  const openChat = useCallback(async (tid: string) => {
+    try {
+      const turns = await api<Run[]>(`/chats/${tid}`);
+      if (!turns.length) return;
+      threadRef.current = tid; setThreadId(tid); setThreadRuns(turns); setGoal(''); setContinueFrom(''); setAttachments([]);
+      watch(turns[turns.length - 1].id);
+    } catch (e) { handleErr(e); }
+  }, [watch, handleErr]);
+
+  const deleteChat = useCallback(async (tid: string) => {
+    try {
+      await api(`/chats/${tid}`, { method: 'DELETE' });
+      if (tid === threadRef.current || snap?.run.threadId === tid || snap?.run.id === tid) newChat();
+      await refreshRuns();
+    } catch (e) { handleErr(e); }
+  }, [snap, newChat, refreshRuns, handleErr]);
 
   const addFiles = useCallback(async (files: File[]) => {
     setUploading(true);
@@ -240,7 +268,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppCtx.Provider value={{
-      threadId, newChat, attachments, uploading, addFiles, removeAttachment, pcTaskId, setPcTaskId, pcVersion, refreshPc, continueFrom, setContinueFrom, answerQuestions, approvePlan, revisePlan, rejectPlan,
+      threadId, newChat, chats, threadRuns, openChat, deleteChat, attachments, uploading, addFiles, removeAttachment, pcTaskId, setPcTaskId, pcVersion, refreshPc, continueFrom, setContinueFrom, answerQuestions, approvePlan, revisePlan, rejectPlan,
       authed, user, login, retryTask, goal, setGoal, logout, settings, updateSettings, settingsOpen, setSettingsOpen, panel, setPanel,
       snap, runs, refreshRuns, startRun, openRun: watch, cancelRun, starting, error,
       clearError: () => setError(''), selectedTaskId, selectTask,
