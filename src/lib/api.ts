@@ -71,7 +71,7 @@ export interface AgentTask {
 
 export interface Run {
   id: string; goal: string; projectName: string; summary: string; answer: string; sources: { title: string; url: string }[]; kind: string; mode: 'build' | 'edit'; parentRunId: string;
-  reviewPlan: boolean; deepPlan: boolean; reusedPlan: string; pcTaskId: string; attachments: { id: string; name: string; kind: string }[]; questions: RunQuestion[]; plan: PlanDraft; assumptions: string[]; revisions: number; check: BrowserCheck; cost: number; cacheHit: number;
+  reviewPlan: boolean; deepPlan: boolean; reusedPlan: string; pcTaskId: string; threadId: string; attachments: { id: string; name: string; kind: string }[]; questions: RunQuestion[]; plan: PlanDraft; assumptions: string[]; revisions: number; check: BrowserCheck; cost: number; cacheHit: number;
   estimateTokens: number; estimateCost: number; targetPath: string; status: RunStatus;
   plannerModel: string; workerModel: string; maxTokens: number; tokens: number; tokensIn: number;
   tokensOut: number; error: string; source: string; createdAt: string | null;

@@ -67,7 +67,7 @@ def start_run():
         b.get('maxTokens') or 0, source=b.get('source', 'manual'), memory=recall(goal),
         owner=current_user()['u'], verify_run=bool(b.get('verify')), web_search=bool(b.get('webSearch')),
         review_plan=bool(b.get('reviewPlan')), continue_from=cont,
-        deep_plan=b.get('deepPlan', True) is not False,
+        deep_plan=b.get('deepPlan', True) is not False, thread_id=str(b.get('threadId') or '')[:40],
         attachments=[{'id': u.upload_id, 'name': u.name, 'kind': u.kind} for u in ups])
     return jsonify(run.to_dict()), 201
 

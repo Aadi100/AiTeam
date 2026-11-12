@@ -32,6 +32,27 @@ def needs_search(text):
     return bool(_recent.search(text or ''))
 
 
+_skip = re.compile(r"^(?:hi|hello|hey|thanks|thank you|ok|okay|yes|no|yep|cool|great|nice|bye|good (?:morning|evening|night))\b[\s!.?]*$", re.I)
+_task = re.compile(r"^(?:please |can you |could you )?(?:explain|define|write|translate|summari[sz]e|rewrite|rephrase|correct|fix|calculate|solve|"
+                   r"brainstorm|draft|give me (?:an? )?(?:example|idea))\b", re.I)
+_lookup = re.compile(r"\b(?:who|whom|whose|what|which|when|where|how is|how are|how was|how did|tell me about|information|info|details|news|"
+                     r"search|look ?up|google|browse|find out|research|go read|read about|real information|profile|"
+                     r"how (?:old|many|much|long|tall|far|big|rich)|born|died|age|biography|career|married|net worth)\b", re.I)
+
+
+def should_search(text, always=False):
+    """Look the answer up on the web? Yes for factual questions and explicit requests, no for greetings and writing tasks.
+    (Costs one Tavily search; the free plan covers about 1,000 a month.)"""
+    g = (text or '').strip()
+    if always:
+        return True
+    if not g or _skip.match(g) or _task.match(g):
+        return False
+    if needs_search(g):
+        return True
+    return len(g.split()) >= 2 and bool(_lookup.search(g))
+
+
 def _tavily(query, key):
     try:
         r = requests.post('https://api.tavily.com/search', timeout=25,

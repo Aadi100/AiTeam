@@ -9,10 +9,11 @@ API keys live only in memory while a run is active; they are never stored in Mon
 """
 
 import os
+import re
 import uuid
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 from models import RunDocument, AgentTaskDocument
@@ -54,7 +55,7 @@ def _release(run_id):
 
 
 def create_run(goal, target_path, keys, planner_model='', worker_model='', max_tokens=0, source='manual',
-               memory='', owner='', verify_run=False, web_search=False, review_plan=False, continue_from='', deep_plan=True, attachments=None):
+               memory='', owner='', verify_run=False, web_search=False, review_plan=False, continue_from='', deep_plan=True, attachments=None, thread_id=''):
     run_id = 'run_' + uuid.uuid4().hex[:10]
     mode, parent_id, project = 'build', '', ''
     if continue_from:   # a follow-up change to an existing project: same folder, planner sees what exists
@@ -69,7 +70,7 @@ def create_run(goal, target_path, keys, planner_model='', worker_model='', max_t
     run = RunDocument(run_id=run_id, goal=goal, target_path=target, mode=mode, parent_run_id=parent_id,
                       project_name=project, planner_model=planner_model or DEFAULT_PLANNER,
                       worker_model=worker_model or DEFAULT_WORKER, max_tokens=int(max_tokens or 0), source=source,
-                      owner=owner, verify=bool(verify_run), web_search=bool(web_search), review_plan=bool(review_plan), deep_plan=bool(deep_plan), attachments=attachments or [],
+                      owner=owner, verify=bool(verify_run), web_search=bool(web_search), review_plan=bool(review_plan), deep_plan=bool(deep_plan), attachments=attachments or [], thread_id=thread_id,
                       started_at=_now())
     run.save()
     _activate(run_id, keys, memory)
@@ -328,13 +329,16 @@ def _execute(run_id, task_id):
 
 # ───────────────────────── coordinator ─────────────────────────
 
-ANSWER_SYSTEM_WEB = ("You are Adion, a sharp personal assistant. Answer the question using the numbered WEB SOURCES. "
+ANSWER_SYSTEM_WEB = ("You are Adion, a sharp personal assistant having an ongoing conversation (use CONVERSATION SO FAR to resolve "
+                     "words like it, his, her, that). Answer the question using the numbered WEB SOURCES. "
                      "Cite them inline like [1] or [2]. If the sources do not cover something, say so instead of guessing. "
                      "Be direct and compact: a short paragraph or a compact list.")
 
-ANSWER_SYSTEM = ("You are Adion, a sharp personal assistant. Answer the question directly and accurately, in a few short "
-                 "paragraphs or a compact list. You have no internet access and your knowledge has a cutoff date, so for anything "
-                 "recent, local or uncertain say so briefly instead of guessing. Do not offer to build anything.")
+ANSWER_SYSTEM = ("You are Adion, a sharp personal assistant having an ongoing conversation. Answer directly and accurately, in a few short "
+                 "paragraphs or a compact list. If CONVERSATION SO FAR is given, use it: resolve words like it, his, her, that from it, and "
+                 "do not repeat what was already said. You were given no web sources this time, so your knowledge has a cutoff date: for "
+                 "anything recent or that you are unsure about, say what you do know, say you are not certain, and never invent details. "
+                 "Do not offer to build anything.")
 
 SMALL_CONTRACT = ("stack: plain HTML/CSS/JS in a few files (index.html, style.css, app.js) unless the goal clearly needs a backend, "
                   "then Python Flask (app.py, requirements.txt) serving the page at /.\n"
@@ -343,26 +347,69 @@ SMALL_CONTRACT = ("stack: plain HTML/CSS/JS in a few files (index.html, style.cs
 UNATTENDED = "This is an unattended run: nobody can answer questions. Decide everything yourself and list your assumptions."
 
 
-def _answer_direct(run, spec, lctx, keys, att=''):
-    """A plain question: one short call, no planner, no agents. Searches the web first when the question is
-    about something recent (or the user asked for it) and a Tavily key is available."""
-    system, prompt, sources, note = ANSWER_SYSTEM, run.goal, [], ''
+def _thread_history(run, limit=6, minutes=90):
+    """Earlier chat turns of this conversation (same thread, same user, recent), oldest first."""
+    if not run.thread_id:
+        return []
+    since = _now() - timedelta(minutes=minutes)
+    prev = RunDocument.objects(thread_id=run.thread_id, owner=run.owner, status='completed', created_at__gte=since,
+                               run_id__ne=run.run_id).order_by('-created_at')[:limit]
+    return [(p.goal, p.answer) for p in reversed(list(prev)) if p.answer]
+
+
+def _convo_text(history):
+    return '\n'.join(f'User: {q[:300]}\nAdion: {a[:600]}' for q, a in history)
+
+
+_pronoun = re.compile(r"\b(?:it|its|he|him|his|she|her|hers|they|them|their|that|this|these|those|there)\b", re.I)
+ATT_NOTE = (' The user attached files (see ATTACHED FILES). Answer from them. You cannot see pictures: for a picture you only have OCR text '
+            'and basic facts, so say so if asked about how it looks.')
+
+
+def _search_query(spec, goal, history, lctx):
+    """A follow-up like "go read its real information" is useless to a search engine: rewrite it using the conversation."""
+    if not history or not (_pronoun.search(goal) or len(goal.split()) < 8):
+        return goal
+    try:
+        q, _, _ = llm.chat(spec, 'Rewrite the LAST message as ONE standalone web search query (max 12 words) using the conversation for '
+                                 'context. Reply with the query only, no quotes.',
+                           f'CONVERSATION:\n{_convo_text(history[-3:])}\n\nLAST MESSAGE: {goal}',
+                           json_mode=False, max_output=40, ctx=dict(lctx, purpose='answer'))
+        q = q.strip().strip('"')
+        return q.splitlines()[0][:200] if q else f'{history[-1][0]} {goal}'[:200]
+    except llm.LLMError:
+        return f'{history[-1][0]} {goal}'[:200]
+
+
+def _answer_direct(run, spec, lctx, keys, att='', history=None):
+    """A question or a follow-up in a chat: one short call, no planner, no agents. Remembers the conversation, and looks
+    things up on the web (Tavily) whenever the question is factual or the user asks for it."""
+    history = history or []
+    system, sources, note, parts = ANSWER_SYSTEM, [], '', []
+    if history:
+        parts.append('CONVERSATION SO FAR:\n' + _convo_text(history))
     if att:
-        system += (' The user attached files (see ATTACHED FILES). Answer from them. You cannot see pictures: for a picture you only have OCR text '
-                   'and basic facts, so say so if asked about how it looks.')
-        prompt = f'{att}\n\nQUESTION: {run.goal}'
+        parts.append(att)
     tkey = (keys or {}).get('tavily', '')
-    if tkey and (run.web_search or search.needs_search(run.goal)):
+    wants = run.web_search or search.should_search(run.goal)
+    if tkey and wants:
         try:
-            found = search.search(run.goal, tkey, ctx=dict(lctx, purpose='search'))['results']
+            query = _search_query(spec, run.goal, history, lctx)
+            found = search.search(query, tkey, ctx=dict(lctx, purpose='search'))['results']
             if found:
                 system = ANSWER_SYSTEM_WEB
-                prompt = (f'{att}\n\n' if att else '') + f'WEB SOURCES:\n{search.format_sources(found)}\n\nQUESTION: {run.goal}'
+                parts.append(f'WEB SOURCES (searched for: {query}):\n{search.format_sources(found)}')
                 sources = [{'title': r['title'], 'url': r['url']} for r in found]
+            else:
+                note = '\n\n(I searched the web but found nothing useful, so this is only what I already know.)'
         except search.SearchError as e:
             note = f'\n\n(Web search was unavailable: {e} This answer is from my built-in knowledge and may be out of date.)'
-    elif run.web_search and not tkey:
-        note = '\n\n(Web search is switched on but no Tavily key is saved. Add one in Models & keys.)'
+    elif wants and not tkey:
+        note = ('\n\n(Web search is switched on but no Tavily key is saved. Add one in Models & keys.)' if run.web_search else
+                '\n\n(I can only answer from what I already know. Add a free Tavily key in Models & keys and I will look this up on the web.)')
+    if att:
+        system += ATT_NOTE
+    prompt = '\n\n'.join(parts + [f'QUESTION: {run.goal}'])
     text, ti, to = _stream_answer(run.run_id, spec, system, prompt, lctx)
     if text is None:   # cancelled while streaming
         return _finish(run.run_id, 'cancelled', 'Cancelled')
@@ -408,8 +455,8 @@ def _coordinate(run_id, feedback=''):
         kind = run.kind
         if not kind:
             kind = router.classify(run.goal)
-            if uploads and kind == 'auto':
-                kind = 'chat'   # "summarize this" with a file attached is a question about the file
+            if (uploads or _thread_history(run)) and kind == 'auto':
+                kind = 'chat'   # a file, or an ongoing chat, makes a vague message a question/follow-up
             if run.mode == 'edit' and kind != 'chat':
                 kind = 'edit'
             fc = router.forecast(run.goal, kind, verify=run.verify, web_search=run.web_search)
@@ -422,7 +469,7 @@ def _coordinate(run_id, feedback=''):
             clar = (clar + '\n' + UNATTENDED).strip()
         try:
             if kind == 'chat':
-                return _answer_direct(run, pspec, lctx, ctx['keys'], att)
+                return _answer_direct(run, pspec, lctx, ctx['keys'], att, _thread_history(run))
             if kind == 'pc':   # something to do on the user's PC: hand over to the PC engine (it asks before changing anything)
                 from .pc import engine as pc_engine
                 tid = pc_engine.start_task(run.goal, run.owner, ctx['keys'], run_id=run_id)

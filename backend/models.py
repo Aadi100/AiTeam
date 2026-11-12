@@ -24,6 +24,7 @@ class RunDocument(me.Document):
     deep_plan = me.BooleanField(default=True)      # plan big projects with the slower, smarter reasoner model
     reused_plan = me.StringField(default='')       # name of an earlier good plan this one was modelled on
     pc_task_id = me.StringField(default='')        # a PC-control request started from the composer
+    thread_id = me.StringField(default='')         # a chat conversation: follow-up questions share it
     attachments = me.ListField(me.DictField(), default=list)   # [{id, name, kind}] files given with the goal
     questions = me.ListField(me.DictField(), default=list)  # [{id, q, options, answer, taskId}] asked of the user
     plan = me.DictField(default=dict)              # plan waiting for approval
@@ -60,7 +61,7 @@ class RunDocument(me.Document):
             'summary': self.summary, 'answer': self.answer, 'sources': self.sources,
             'kind': self.kind, 'mode': self.mode, 'parentRunId': self.parent_run_id, 'reviewPlan': self.review_plan,
             'questions': self.questions, 'plan': self.plan, 'assumptions': self.assumptions,
-            'deepPlan': self.deep_plan, 'reusedPlan': self.reused_plan, 'pcTaskId': self.pc_task_id, 'attachments': self.attachments,
+            'deepPlan': self.deep_plan, 'reusedPlan': self.reused_plan, 'pcTaskId': self.pc_task_id, 'threadId': self.thread_id, 'attachments': self.attachments,
             'revisions': self.revisions, 'check': self.check, 'targetPath': self.target_path, 'status': self.status,
             'plannerModel': self.planner_model, 'workerModel': self.worker_model,
             'maxTokens': self.max_tokens, 'tokensIn': self.tokens_in, 'tokensOut': self.tokens_out,

@@ -80,7 +80,7 @@ check('recent: completed with cited answer', d.status == 'completed' and '[1]' i
 check('recent: exactly one Tavily call with bearer key', len(tavily_calls) == 1 and tavily_calls[0][1] == 'Bearer tvly-testtesttest' and tavily_calls[0][0].endswith('/search'), str(tavily_calls))
 check('recent: sources saved, empty result dropped', [s['url'] for s in d.sources] == ['https://example.com/a', 'https://example.com/b'], str(d.sources))
 sys_p, user_p = llm_prompts[0]
-check('recent: model got numbered sources + question', user_p.startswith('WEB SOURCES:\n[1] Release notes') and 'QUESTION:' in user_p)
+check('recent: model got numbered sources + question', user_p.startswith('WEB SOURCES (searched for:') and '[1] Release notes' in user_p and 'QUESTION:' in user_p)
 check('recent: snippets trimmed (cheap prompt)', len(user_p) < 1200, str(len(user_p)))
 rows = list(UsageDocument.objects(run_id=d.run_id))
 check('recent: ledger has a search row and an answer row', {r.purpose for r in rows} == {'search', 'answer'}, str({r.purpose for r in rows}))

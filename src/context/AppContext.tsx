@@ -21,6 +21,7 @@ interface Ctx {
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   settings: Settings;
+  threadId: string; newChat: () => void;
   attachments: Upload[]; uploading: boolean; addFiles: (files: File[]) => Promise<void>; removeAttachment: (id: string) => void;
   pcTaskId: string; setPcTaskId: (id: string) => void; pcVersion: number; refreshPc: () => void;
   continueFrom: string; setContinueFrom: (id: string) => void;
@@ -59,6 +60,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [continueFrom, setContinueFrom] = useState('');
   const [pcTaskId, setPcTaskId] = useState('');
+  // the conversation id is created on first use (in an event handler), never during render: it uses the clock
+  const [threadId, setThreadId] = useState('');
+  const threadRef = useRef('');
   const [attachments, setAttachments] = useState<Upload[]>([]);
   const [uploading, setUploading] = useState(false);
   const [pcVersion, setPcVersion] = useState(0);
@@ -157,19 +161,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const startRun = useCallback(async (goal: string, source = 'manual') => {
     setStarting(true); setError('');
+    if (!threadRef.current) { threadRef.current = 'th_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); setThreadId(threadRef.current); }
+    const thread = threadRef.current;
     try {
       const run = await api<Run>('/runs', {
         method: 'POST',
         json: {
           goal, targetPath: settings.targetPath, source, verify: settings.verify, webSearch: settings.webSearch,
           reviewPlan: settings.reviewPlan, deepPlan: settings.deepPlan, continueRunId: continueFrom || undefined,
-          attachments: attachments.map(a => a.id),
+          attachments: attachments.map(a => a.id), threadId: thread,
           plannerModel: settings.plannerModel, workerModel: settings.workerModel, maxTokens: settings.maxTokens,
         },
       });
       setPanel('runs');
       setContinueFrom('');
       setAttachments([]);
+      setGoal('');   // like a chat: the box empties once you send
       watch(run.id);
       refreshRuns();
     } catch (e) { handleErr(e); } finally { setStarting(false); }
@@ -189,6 +196,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       watch(snap.run.id);
     } catch (e) { handleErr(e); }
   }, [snap, watch, handleErr]);
+
+  const newChat = useCallback(() => {
+    stopWatching(); setSnap(null); setGoal(''); setAttachments([]); setContinueFrom('');
+    threadRef.current = ''; setThreadId('');
+  }, [stopWatching]);
 
   const addFiles = useCallback(async (files: File[]) => {
     setUploading(true);
@@ -228,7 +240,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppCtx.Provider value={{
-      attachments, uploading, addFiles, removeAttachment, pcTaskId, setPcTaskId, pcVersion, refreshPc, continueFrom, setContinueFrom, answerQuestions, approvePlan, revisePlan, rejectPlan,
+      threadId, newChat, attachments, uploading, addFiles, removeAttachment, pcTaskId, setPcTaskId, pcVersion, refreshPc, continueFrom, setContinueFrom, answerQuestions, approvePlan, revisePlan, rejectPlan,
       authed, user, login, retryTask, goal, setGoal, logout, settings, updateSettings, settingsOpen, setSettingsOpen, panel, setPanel,
       snap, runs, refreshRuns, startRun, openRun: watch, cancelRun, starting, error,
       clearError: () => setError(''), selectedTaskId, selectTask,

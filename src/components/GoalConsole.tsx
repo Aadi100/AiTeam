@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Mic, MicOff, ArrowUp, Square, Loader2, FolderOpen, SlidersHorizontal, ChevronDown, Pencil, X, Paperclip, FileText, Image as ImageIcon } from 'lucide-react';
+import { Mic, MicOff, ArrowUp, Square, Loader2, FolderOpen, SlidersHorizontal, ChevronDown, Pencil, X, Paperclip, FileText, Image as ImageIcon, MessageSquarePlus } from 'lucide-react';
 import VoiceOrb from '@/components/VoiceOrb';
 import { useApp } from '@/context/AppContext';
 import { useVoice } from '@/context/VoiceContext';
@@ -17,7 +17,7 @@ function greeting(): string {
 const field = 'w-full rounded-lg bg-slate-950/80 border border-slate-800 px-2.5 py-1.5 text-xs outline-none focus:border-cyan-500 transition';
 
 export default function GoalConsole() {
-  const { settings, updateSettings, startRun, cancelRun, snap, starting, error, clearError, goal, setGoal, user, continueFrom, setContinueFrom, runs, attachments, uploading, addFiles, removeAttachment } = useApp();
+  const { settings, updateSettings, startRun, cancelRun, snap, starting, error, clearError, goal, setGoal, user, continueFrom, setContinueFrom, runs, attachments, uploading, addFiles, removeAttachment, newChat } = useApp();
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const { isVoiceActive, isThinking, isSpeaking, voiceTranscript, voiceError, toggleVoiceListening,
@@ -52,6 +52,12 @@ export default function GoalConsole() {
 
   return (
     <section className="rounded-3xl border border-slate-800/80 bg-gradient-to-b from-slate-900/80 to-slate-900/30 p-5 sm:p-6 shadow-xl shadow-black/20">
+      {snap && (
+        <button onClick={newChat} title="Start a fresh conversation (Adion forgets this chat)"
+          className="float-right flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:border-cyan-500 hover:text-cyan-200 transition">
+          <MessageSquarePlus className="h-3.5 w-3.5" /> New chat
+        </button>
+      )}
       <div className="flex items-center gap-5">
         <div className="hidden sm:block shrink-0"><VoiceOrb isActive={orbActive} size={84} /></div>
         <div className="min-w-0">
@@ -77,7 +83,7 @@ export default function GoalConsole() {
         <textarea
           value={text}
           onChange={e => setGoal(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(); }}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } }}
           rows={3}
           placeholder={attachments.length ? 'Ask about the attached file, or say what to build with it…' : editing ? 'Describe the change you want…' : 'Describe the app you want, attach a file, or press the mic and talk to Adion…'}
           className="w-full resize-none bg-transparent px-4 pt-3 text-sm outline-none placeholder:text-slate-600"
@@ -109,7 +115,7 @@ export default function GoalConsole() {
             <ChevronDown className={`h-3 w-3 transition ${showOptions ? 'rotate-180' : ''}`} />
           </button>
           <div className="flex items-center gap-2">
-            <span className="hidden md:inline text-[10px] text-slate-600">Ctrl+Enter</span>
+            <span className="hidden md:inline text-[10px] text-slate-600">Enter to send · Shift+Enter for a new line</span>
             <button onClick={toggleVoiceListening} title="Talk to Adion (Alt+V)"
               className={`h-9 w-9 rounded-full border flex items-center justify-center transition ${isVoiceActive ? 'bg-rose-600/20 border-rose-500 text-rose-300 animate-pulse' : 'border-slate-700 text-slate-300 hover:border-cyan-500 hover:text-cyan-300'}`}>
               {isThinking ? <Loader2 className="h-4 w-4 animate-spin" /> : isVoiceActive ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}

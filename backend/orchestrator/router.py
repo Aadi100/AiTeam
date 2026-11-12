@@ -12,7 +12,7 @@ forecast(...) predicts tokens and cost BEFORE spending them, using the same pric
 
 import re
 from .llm import count_tokens, cost_usd
-from .search import needs_search
+from .search import needs_search, should_search
 
 BUILD_VERBS = r'build|create|make|generate|develop|code|program|implement|scaffold|set\s*up|design|write\s+(?:me\s+)?(?:an?|the)\s+\w*\s*(?:app|script|site|page|tool|api|bot|program|game|function|component)|add\s+(?:a|an|the)|fix|refactor|convert|port\s+to|clone'
 BUILD_NOUNS = r'app|application|website|web\s*site|site|page|landing|dashboard|api|backend|frontend|script|tool|bot|game|crm|extension|plugin|cli|calculator|tracker|portfolio|blog|store|shop|platform|system|service|component|widget|form|database|schema|server'
@@ -102,7 +102,7 @@ def forecast(goal, kind=None, module_descs=None, contract_text=None, verify=Fals
     g = count_tokens(goal) + int(extra_tokens or 0)
     parts = []
     if kind == 'chat':
-        web = needs_search(goal) or web_search
+        web = should_search(goal, web_search)
         parts.append(('Answer + web sources' if web else 'Answer', _row(120 + g + (480 if web else 0), 0.0, 350)))
         n = 0
     elif kind == 'pc':
