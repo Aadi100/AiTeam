@@ -13,7 +13,7 @@ const DEFAULTS: Settings = {
 };
 const SETTINGS_KEY = 'devsquad.settings.v2';
 
-export type Panel = 'runs' | 'jobs' | 'schedules' | 'memory' | 'usage' | 'pc' | 'users';
+export type Panel = 'runs' | 'jobs' | 'schedules' | 'memory' | 'usage' | 'pc' | 'apps' | 'users';
 
 interface Ctx {
   authed: boolean | null;

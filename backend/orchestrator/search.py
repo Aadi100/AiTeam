@@ -89,19 +89,51 @@ def search(query, key, ctx=None):
     return res
 
 
-def _record(ctx):
+def _record(ctx, cost=None, model=None):
     """One ledger row per search so the Usage tab can count them."""
+    cost = PRICE_PER_SEARCH if cost is None else cost
     try:
         from models import UsageDocument, RunDocument
         ctx = ctx or {}
-        UsageDocument(owner=ctx.get('owner', ''), run_id=ctx.get('run_id', ''), purpose='search', model=PROVIDER,
-                      cost_usd=PRICE_PER_SEARCH).save()
-        if ctx.get('run_id') and PRICE_PER_SEARCH:
-            RunDocument.objects(run_id=ctx['run_id']).update_one(inc__cost_usd=PRICE_PER_SEARCH)
+        UsageDocument(owner=ctx.get('owner', ''), run_id=ctx.get('run_id', ''), purpose='search', model=model or PROVIDER,
+                      cost_usd=cost).save()
+        if ctx.get('run_id') and cost:
+            RunDocument.objects(run_id=ctx['run_id']).update_one(inc__cost_usd=cost)
     except Exception:  # noqa: BLE001
         pass
+
+
+# Tavily is for DeepSeek. When Claude is answering it searches with its own built-in web search instead, so no Tavily key is needed.
+CLAUDE_PRICE_PER_SEARCH = float(os.getenv('CLAUDE_PRICE_PER_SEARCH', '0.01'))     # $10 per 1,000 searches
+
+
+def uses_claude(spec):
+    return (spec or {}).get('provider') == 'anthropic'
+
+
+def available(spec, tavily_key):
+    """Can this model search the web right now?"""
+    return bool((spec or {}).get('key')) if uses_claude(spec) else bool(tavily_key)
+
+
+def search_for(spec, query, tavily_key, ctx=None):
+    """Search with whatever fits the model that is answering: Claude's own search for Claude, Tavily for DeepSeek."""
+    if not uses_claude(spec):
+        return search(query, tavily_key, ctx)
+    from orchestrator import claude_llm, llm
+    try:
+        res, n = claude_llm.web_search(spec, query, ctx)
+    except llm.LLMError as e:
+        raise SearchError(str(e))
+    _record(ctx, cost=CLAUDE_PRICE_PER_SEARCH * max(1, n), model='claude-web-search')
+    return res
 
 
 def format_sources(results):
     """Compact block for the model prompt."""
     return '\n'.join(f'[{i}] {r["title"]} ({r["url"]})\n{r["content"]}' for i, r in enumerate(results, 1))
+
+
+def source_links(results):
+    """The links to show the user (a search summary is not a page, so it is left out)."""
+    return [{'title': r['title'], 'url': r['url']} for r in results if not r.get('summary')]

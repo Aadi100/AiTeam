@@ -4,7 +4,8 @@ import os, sys, io, json, time, tempfile, shutil, re
 ROOT = os.path.realpath(tempfile.mkdtemp(prefix='adion_files_'))
 HOME = os.path.join(ROOT, 'home'); os.makedirs(os.path.join(HOME, 'Desktop'))
 os.environ.update({'ADION_UPLOADS': os.path.join(ROOT, 'uploads'), 'ADION_PC_HOME': HOME, 'ADION_PC_DESKTOP': os.path.join(HOME, 'Desktop'),
-                   'MONGO_URI': 'mongodb://localhost:27017/devsquad_test'})
+                   'MONGO_URI': 'mongodb://localhost:27017/devsquad_test', 'ADION_AGENT': '0'})
+os.environ['ADION_LEARN'] = '0'      # learning has its own tests (test_learn.py)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import mongoengine as me
 from app import create_app

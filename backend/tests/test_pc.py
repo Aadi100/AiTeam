@@ -7,6 +7,7 @@ for sub in ('Desktop', 'Documents', 'Downloads', 'Pictures'):
 os.environ.update({'ADION_PC_HOME': HOME, 'ADION_PC_DESKTOP': os.path.join(HOME, 'Desktop'), 'ADION_PC_DOCUMENTS': os.path.join(HOME, 'Documents'),
                    'ADION_PC_DOWNLOADS': os.path.join(HOME, 'Downloads'), 'ADION_PC_PICTURES': os.path.join(HOME, 'Pictures'),
                    'MONGO_URI': 'mongodb://localhost:27017/devsquad_test'})
+os.environ['ADION_LEARN'] = '0'      # learning has its own tests (test_learn.py)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import mongoengine as me
 from app import create_app

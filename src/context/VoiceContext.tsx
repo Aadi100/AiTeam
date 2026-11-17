@@ -66,7 +66,7 @@ const WAKE = /\b(?:adion|a\s?dion|adian|adeon|a\s?deon|addion|aidan|aiden|ad\s?i
 
 interface ChatReply {
   reply: string; readout?: string; lang?: string;
-  action: { type: 'none' | 'build' | 'cancel' | 'read_file' | 'remember' | 'pc'; goal?: string; taskId?: string };
+  action: { type: 'none' | 'build' | 'cancel' | 'read_file' | 'remember' | 'pc' | 'apps' | 'agent'; goal?: string; taskId?: string };
 }
 
 export function VoiceProvider({ children }: { children: React.ReactNode }) {
@@ -269,8 +269,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       if (autoRef.current) { await c.startRun(res.action.goal, 'voice'); return ''; }
       return ' I put it in the goal box. Press run when you are ready.';
     }
+    if (res.action.type === 'agent' && res.action.goal) { await c.startRun(res.action.goal, 'voice'); return ''; }
     if (res.action.type === 'cancel') { await c.cancelRun(); }
     if (res.action.type === 'pc' && res.action.taskId) { c.setPcTaskId(res.action.taskId); return ' I will ask before I change anything.'; }
+    if (res.action.type === 'apps' && res.action.taskId) { c.setPcTaskId(res.action.taskId); return ' I will ask before I send or change anything.'; }
     return '';
   }, []);
 

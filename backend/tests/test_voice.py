@@ -2,6 +2,7 @@
 user's language. The Microsoft voice service is faked, so nothing is sent anywhere."""
 import os, sys, io, json, wave, struct, math, asyncio
 os.environ['MONGO_URI'] = 'mongodb://localhost:27017/devsquad_test'
+os.environ['ADION_LEARN'] = '0'      # learning has its own tests (test_learn.py); here it would consume the scripted model replies
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import mongoengine as me
 from app import create_app

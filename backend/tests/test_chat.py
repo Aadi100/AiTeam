@@ -2,6 +2,8 @@
 Fake model, fake Tavily; no tokens, no credits."""
 import os, sys, json, time, tempfile, types
 os.environ['MONGO_URI'] = 'mongodb://localhost:27017/devsquad_test'
+os.environ['ADION_LEARN'] = '0'      # learning has its own tests (test_learn.py); here it would consume the scripted model replies
+os.environ['ADION_AGENT'] = '0'      # these tests cover the classic one-call answer path (the fallback); tests/test_agent.py covers the agent
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests
 import mongoengine as me
@@ -94,7 +96,7 @@ check('A5: greetings do not spend a search', tavily == [] and d.answer == 'An an
 d = ask('explain recursion')
 check('A6: writing/explaining tasks do not spend a search', tavily == [])
 d = ask('who is the ceo of nvidia', keys=NO_TAVILY)
-check('A7: no Tavily key: honest note telling the user how to fix it', tavily == [] and 'Add a free Tavily key' in d.answer and d.answer.startswith('An answer.'), d.answer)
+check('A7: no Tavily key: honest note telling the user how to fix it', tavily == [] and 'add a free Tavily key' in d.answer and d.answer.startswith('An answer.'), d.answer)
 d = ask('hi', keys=NO_TAVILY)
 check('A8: ...but no nagging on a greeting', 'Tavily' not in d.answer)
 

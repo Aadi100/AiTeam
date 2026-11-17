@@ -66,8 +66,9 @@ export type TaskStatus = 'queued' | 'running' | 'waiting' | 'done' | 'failed' | 
 export type RunStatus = 'planning' | 'awaiting_input' | 'awaiting_approval' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface RunQuestion { id: string; q: string; options: string[]; answer: string; taskId: string; agent?: string }
-export interface PlanModule { key: string; title: string; description: string; folder: string; depends_on: string[]; expects: string[] }
-export interface PlanDraft { project_name?: string; summary?: string; contract?: string; assumptions?: string[]; modules?: PlanModule[] }
+export interface PlanModule { key: string; title: string; plain?: string; description: string; folder: string; depends_on: string[]; expects: string[] }
+export interface PlanOverview { features: string[]; screens: string[]; stack: { area: string; choice: string; why: string }[]; data: string[]; ideas: string[] }
+export interface PlanDraft { project_name?: string; summary?: string; overview?: PlanOverview; contract?: string; assumptions?: string[]; modules?: PlanModule[] }
 export interface BrowserCheck {
   ok?: boolean; url?: string; title?: string; skipped?: boolean; reason?: string; round?: number; screenshot?: boolean;
   buttons?: number; issues?: { level: 'error' | 'warn'; msg: string }[]; links?: { url: string; status: number }[];
@@ -83,7 +84,7 @@ export interface AgentTask {
 }
 
 export interface Run {
-  id: string; goal: string; projectName: string; summary: string; answer: string; sources: { title: string; url: string }[]; kind: string; mode: 'build' | 'edit'; parentRunId: string;
+  id: string; goal: string; projectName: string; summary: string; answer: string; sources: { title: string; url: string }[]; cards?: { type: string; provider?: string; name?: string }[]; kind: string; mode: 'build' | 'edit'; parentRunId: string;
   reviewPlan: boolean; deepPlan: boolean; reusedPlan: string; pcTaskId: string; threadId: string; attachments: { id: string; name: string; kind: string }[]; questions: RunQuestion[]; plan: PlanDraft; assumptions: string[]; revisions: number; check: BrowserCheck; cost: number; cacheHit: number;
   estimateTokens: number; estimateCost: number; targetPath: string; status: RunStatus;
   plannerModel: string; workerModel: string; maxTokens: number; tokens: number; tokensIn: number;
@@ -101,7 +102,7 @@ export interface Job {
   id: string; title: string; command: string; cwd: string; status: string; pid: number;
   exitCode: number | null; createdAt: string; endedAt: string | null; log?: string;
 }
-export interface MemoryItem { id: string; text: string; kind: string; createdAt: string }
+export interface MemoryItem { id: string; text: string; kind: string; source?: string; createdAt: string }
 export interface Schedule {
   id: string; name: string; goal: string; targetPath: string; everyMinutes: number; dailyAt: string;
   enabled: boolean; lastRunAt: string | null; lastRunId: string; maxTokens: number; hasKeys: boolean;
@@ -137,7 +138,7 @@ export interface PcAction { id: string; taskId: string; tool: string; summary: s
 export interface PcActivity { actions: PcAction[]; tasks: PcTask[] }
 
 export interface Forecast {
-  kind: 'chat' | 'small' | 'large' | 'auto' | 'pc'; modules: number; tokens: number; low: number; high: number;
+  kind: 'chat' | 'small' | 'large' | 'auto' | 'pc' | 'apps'; modules: number; tokens: number; low: number; high: number;
   cost: number; costLow: number; costHigh: number; parts: { name: string; tokens: number; cost: number }[];
 }
 

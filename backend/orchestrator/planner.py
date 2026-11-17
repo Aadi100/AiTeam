@@ -19,18 +19,28 @@ STEP 1 - decide what the user wants.
   Never ask about things you can reasonably decide yourself, and never ask twice (see CLARIFICATIONS).
 - Otherwise it is a build request: go to STEP 2.
 
-STEP 2 - split the goal into MODULES that separate AI agents build IN PARALLEL, each in its own folder.
-Size the plan to the request: simple = 3-4 modules, large = more. Never pad with features the user did not ask for.
+STEP 2 - think like a senior product designer AND architect, then split the goal into MODULES that separate AI agents build IN PARALLEL, each in its own folder.
+Size the plan to the request: simple = 3-4 modules, large = more. Never pad with features the user did not ask for, but DO cover what makes it feel finished:
+the main flow end to end, sensible empty states, input validation and clear error messages, a responsive and good-looking interface (consistent colors, spacing, readable type),
+useful sample/seed data where it helps, and anything the user clearly implied. Pick the simplest stack that fully does the job.
 
 Return ONLY JSON:
 {
  "type": "build",
  "project_name": "short name",
- "summary": "1-2 sentences",
+ "summary": "1-2 friendly sentences: what the user will have when it is done",
+ "overview": {
+   "features": ["what the user will be able to DO, in plain words, 4-8 items, e.g. 'Add, edit and delete expenses'"],
+   "screens": ["Name - what is on it, e.g. 'Dashboard - totals and two charts'"],
+   "stack": [{"area": "Frontend", "choice": "e.g. HTML + CSS + JavaScript", "why": "plain-language reason, max 12 words"}],
+   "data": ["what it stores, in plain words, e.g. 'Expenses (date, amount, category)'"],
+   "ideas": ["2-4 optional extras that are NOT in this plan but would be good next, each as a short instruction like 'Add login so several people can use it'"]
+ },
  "assumptions": ["every choice YOU made where the goal was silent, one short sentence each, e.g. 'Plain HTML/CSS/JS, no framework'"],
  "contract": {"stack": "exact technologies", "files": "key file names and where they live", "api": "every route: METHOD /path -> request/response shape", "data": "data models and field names", "ui": "colors, fonts, shared CSS class names", "links": "how modules link to each other"},
  "modules": [
-   {"key": "snake_case_id", "title": "Build the X module", "description": "what to build and acceptance criteria",
+   {"key": "snake_case_id", "title": "Build the X module", "plain": "ONE friendly sentence for a non-technical reader: what this part gives the user",
+    "description": "technical instructions for the agent: what to build and acceptance criteria",
     "folder": "unique/relative/folder", "depends_on": ["other_key"], "expects": ["files/this/module/must/create.ext"]}
  ]
 }
@@ -85,7 +95,7 @@ def _clean(modules):
         keys.add(key)
         folders.add(folder)
         out.append({'key': key, 'title': (m.get('title') or key)[:120],
-                    'description': m.get('description') or '', 'folder': folder,
+                    'description': m.get('description') or '', 'plain': str(m.get('plain') or '').strip()[:240], 'folder': folder,
                     'expects': _expects(m.get('expects')),
                     'depends_on': [slug(d).replace('/', '_') for d in (m.get('depends_on') or []) if isinstance(d, str)]})
     out = out[:MAX_MODULES]
@@ -136,6 +146,21 @@ def _critic(spec, plan, ctx):
             plan['contract'] += '\n' + data['contract_add'].strip()
         plan['modules'] = _clean(plan['modules'])
     return ti, to
+
+
+def _strs(raw, n, width):
+    return [str(x).strip()[:width] for x in (raw or []) if isinstance(x, (str, int, float)) and str(x).strip()][:n]
+
+
+def _overview(raw):
+    """The friendly, non-technical description of the plan: what you get, the screens, how it is built, what it stores, ideas to add."""
+    o = raw if isinstance(raw, dict) else {}
+    stack = []
+    for it in o.get('stack') or []:
+        if isinstance(it, dict) and str(it.get('choice') or '').strip():
+            stack.append({'area': str(it.get('area') or '').strip()[:40], 'choice': str(it['choice']).strip()[:80], 'why': str(it.get('why') or '').strip()[:140]})
+    return {'features': _strs(o.get('features'), 10, 140), 'screens': _strs(o.get('screens'), 8, 160), 'stack': stack[:6],
+            'data': _strs(o.get('data'), 8, 140), 'ideas': _strs(o.get('ideas'), 4, 120)}
 
 
 def _questions(raw):
@@ -198,6 +223,7 @@ def make_plan(spec, goal, memory_notes='', existing_files=None, ctx=None, clarif
         'project_name': (data.get('project_name') or goal[:60]).strip(),
         'summary': data.get('summary') or '',
         'assumptions': [str(a).strip()[:200] for a in (data.get('assumptions') or []) if str(a).strip()][:8],
+        'overview': _overview(data.get('overview')),
         'contract': _contract_text(data.get('contract')),
         'modules': modules,
     }

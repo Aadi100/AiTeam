@@ -1,5 +1,7 @@
 'use client';
 
+import Markdown from '@/components/portal/Markdown';
+import ConnectCard from '@/components/ConnectCard';
 import React from 'react';
 import { Loader2, OctagonX, Pencil, CheckCircle2, AlertTriangle, MonitorSmartphone } from 'lucide-react';
 import RunInteraction from '@/components/RunInteraction';
@@ -113,7 +115,8 @@ export default function AgentMap() {
             <p className="text-[11px] uppercase tracking-wider text-slate-500">You</p>
             <p className="text-sm text-slate-300 whitespace-pre-wrap">{r.goal}</p>
             <p className="mt-3 text-[11px] uppercase tracking-wider text-slate-500">Adion</p>
-            {r.pcTaskId ? <div className="mt-1"><PcTaskCard taskId={r.pcTaskId} /></div> : <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">{r.answer}</p>}
+            {r.pcTaskId ? <div className="mt-1"><PcTaskCard taskId={r.pcTaskId} /></div> : <Markdown text={r.answer} />}
+            {r.cards?.map((c, i) => <ConnectCard key={i} card={c} />)}
             {r.sources?.length > 0 && <p className="mt-2 text-[11px] text-slate-500">Sources: {r.sources.map((s, i) => <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer" className="text-cyan-300/80 hover:underline mr-2">[{i + 1}] {s.title.slice(0, 40)}</a>)}</p>}
           </section>
         ))}
@@ -123,9 +126,10 @@ export default function AgentMap() {
         </div>
         <p className="mt-1 text-sm text-slate-400">{run.goal}</p>
         {run.attachments?.length > 0 && <p className="mt-1 text-[11px] text-slate-500">Attached: {run.attachments.map(a => a.name).join(', ')}</p>}
-        <div className="mt-3 text-sm text-slate-100 leading-relaxed whitespace-pre-wrap">
-          {run.answer}{!['completed', 'failed', 'cancelled'].includes(run.status) && <span className="inline-block w-1.5 h-4 -mb-0.5 ml-0.5 bg-cyan-400 animate-pulse" />}
+        <div className="mt-3 text-sm text-slate-100 leading-relaxed">
+          <Markdown text={run.answer} />{!['completed', 'failed', 'cancelled'].includes(run.status) && <span className="inline-block w-1.5 h-4 -mb-0.5 ml-0.5 bg-cyan-400 animate-pulse" />}
         </div>
+        {run.cards?.map((c, i) => <ConnectCard key={i} card={c} />)}
         {run.sources?.length > 0 && (
           <div className="mt-4 border-t border-slate-800 pt-3">
             <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Sources</p>

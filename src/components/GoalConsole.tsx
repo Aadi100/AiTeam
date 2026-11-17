@@ -7,7 +7,7 @@ import { useApp } from '@/context/AppContext';
 import { useVoice } from '@/context/VoiceContext';
 import { api, fmtCost, fmtTokens, ATTACH_ACCEPT, type Forecast } from '@/lib/api';
 
-const KIND: Record<Forecast['kind'], string> = { chat: 'quick answer', pc: 'PC task', small: 'small build, 1 agent', large: 'full build', auto: 'full build' };
+const KIND: Record<Forecast['kind'], string> = { chat: 'quick answer', pc: 'PC task', apps: 'accounts task', small: 'small build, 1 agent', large: 'full build', auto: 'full build' };
 
 function greeting(): string {
   const h = new Date().getHours();

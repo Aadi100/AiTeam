@@ -2,6 +2,7 @@
 failures, follow-up edits, and the REAL headless-browser check. The LLM is faked (no tokens); the browser is real."""
 import os, sys, json, time, tempfile, re
 os.environ['MONGO_URI'] = 'mongodb://localhost:27017/devsquad_test'
+os.environ['ADION_LEARN'] = '0'      # learning has its own tests (test_learn.py); here it would consume the scripted model replies
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import mongoengine as me
 from app import create_app

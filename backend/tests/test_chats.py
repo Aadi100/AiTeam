@@ -1,6 +1,8 @@
 """Offline tests: the chats list (one entry per conversation), reopening, deleting, and privacy. Builds are not chats."""
 import os, sys, json, time, tempfile
 os.environ['MONGO_URI'] = 'mongodb://localhost:27017/devsquad_test'
+os.environ['ADION_LEARN'] = '0'      # learning has its own tests (test_learn.py); here it would consume the scripted model replies
+os.environ['ADION_AGENT'] = '0'      # these tests cover the classic one-call answer path (the fallback); tests/test_agent.py covers the agent
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import mongoengine as me
 from datetime import datetime, timedelta

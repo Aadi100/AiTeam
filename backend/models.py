@@ -49,6 +49,7 @@ class RunDocument(me.Document):
     owner = me.StringField(default='')
     verify = me.BooleanField(default=False)        # run the generated project and auto-fix
     suggested = me.ListField(me.DictField(), default=list)   # [{title, command, cwd}] to run the result
+    cards = me.ListField(me.DictField(), default=list)       # buttons the agent shows in the chat, e.g. {type: 'connect', provider, name}
     created_at = me.DateTimeField(default=datetime.utcnow)
     started_at = me.DateTimeField()
     ended_at = me.DateTimeField()
@@ -68,7 +69,7 @@ class RunDocument(me.Document):
             'tokens': self.tokens_in + self.tokens_out, 'error': self.error, 'source': self.source,
             'cacheHit': self.cache_hit, 'cost': round(self.cost_usd, 5),
             'estimateTokens': self.estimate_tokens, 'estimateCost': round(self.estimate_cost, 5),
-            'owner': self.owner, 'verify': self.verify, 'suggested': self.suggested,
+            'owner': self.owner, 'verify': self.verify, 'suggested': self.suggested, 'cards': self.cards,
             'createdAt': self.created_at.isoformat() + 'Z' if self.created_at else None,
             'startedAt': self.started_at.isoformat() + 'Z' if self.started_at else None,
             'endedAt': self.ended_at.isoformat() + 'Z' if self.ended_at else None,
@@ -184,9 +185,12 @@ class UsageDocument(me.Document):
     tokens_out = me.IntField(default=0)
     cost_usd = me.FloatField(default=0.0)
     saved_usd = me.FloatField(default=0.0)         # what the cache saved versus full price
+    client_id = me.StringField(default='')         # Adion Connect: who is billed
+    app_id = me.StringField(default='')
+    end_user = me.StringField(default='')
     created_at = me.DateTimeField(default=datetime.utcnow)
 
-    meta = {'collection': 'usage', 'indexes': ['run_id', 'owner', '-created_at']}
+    meta = {'collection': 'usage', 'indexes': ['run_id', 'owner', '-created_at', 'client_id', 'app_id']}
 
 
 class AgentTaskDocument(me.Document):
@@ -267,13 +271,26 @@ class MemoryDocument(me.Document):
     text = me.StringField(required=True)
     kind = me.StringField(default='note')           # note|preference|build
     vector = me.ListField(me.FloatField(), default=list)   # embedding, when an embedding model is available
+    owner = me.StringField(default='')              # whose memory ('' = from before memories were private: only the owner/admin sees those)
+    source = me.StringField(default='user')         # user (typed or asked to remember) | learned (Adion picked it up from a conversation)
     created_at = me.DateTimeField(default=datetime.utcnow)
 
-    meta = {'collection': 'memories', 'ordering': ['-created_at']}
+    meta = {'collection': 'memories', 'ordering': ['-created_at'], 'indexes': ['owner']}
 
     def to_dict(self):
-        return {'id': self.mem_id, 'text': self.text, 'kind': self.kind,
+        return {'id': self.mem_id, 'text': self.text, 'kind': self.kind, 'source': self.source,
                 'createdAt': self.created_at.isoformat() + 'Z'}
+
+
+class ThreadSummaryDocument(me.Document):
+    """A rolling summary of the older part of a long conversation, so Adion keeps the thread without resending every word."""
+    owner = me.StringField(required=True)
+    thread_id = me.StringField(required=True)
+    summary = me.StringField(default='')
+    covers = me.IntField(default=0)                 # how many of the oldest completed turns the summary already includes
+    updated_at = me.DateTimeField(default=datetime.utcnow)
+
+    meta = {'collection': 'thread_summaries', 'indexes': [('owner', 'thread_id')]}
 
 
 class ScheduleDocument(me.Document):
@@ -311,6 +328,10 @@ class UserDocument(me.Document):
     role = me.StringField(default='member')        # admin | member | viewer
     deepseek_enc = me.StringField(default='')      # Fernet-encrypted DeepSeek API key
     tavily_enc = me.StringField(default='')        # Fernet-encrypted Tavily (web search) API key
+    anthropic_enc = me.StringField(default='')     # Fernet-encrypted Claude (Anthropic) API key
+    brain = me.StringField(default='')             # owner's model setup: deepseek | claude | mixed ('' = deepseek)
+    learning = me.BooleanField(default=True)       # may Adion learn from this person's chats (their own memory only)
+    connect_mode = me.StringField(default='')      # owner's choice for connecting apps: direct | zapier ('' = direct)
     created_at = me.DateTimeField(default=datetime.utcnow)
 
     meta = {'collection': 'users'}

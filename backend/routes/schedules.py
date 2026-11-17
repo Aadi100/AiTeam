@@ -40,7 +40,7 @@ def _tick():
         if _due(s, now):
             keys = with_stored_key(decrypt_json(s.keys_enc) if s.keys_enc else {}, s.owner)
             run = engine.create_run(s.goal, s.target_path, keys, s.planner_model, s.worker_model,
-                                    s.max_tokens, source='schedule', memory=recall(s.goal), owner=s.owner)
+                                    s.max_tokens, source='schedule', memory=recall(s.goal, owner=s.owner), owner=s.owner)
             s.update(set__last_run_at=now, set__last_run_id=run.run_id)
             print(f'[SCHEDULE] "{s.name}" started {run.run_id}')
 

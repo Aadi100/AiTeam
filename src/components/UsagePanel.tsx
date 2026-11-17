@@ -4,10 +4,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { api, fmtCost, fmtTokens, type Forecast, type UsageStats } from '@/lib/api';
 
 const PURPOSE_LABEL: Record<string, string> = {
-  answer: 'Answers', plan: 'Planner', critic: 'Plan critic', replan: 'Re-planning', pc: 'PC control', agent: 'Agents', fix: 'Fixes', review: 'Review', assistant: 'Voice chat', search: 'Web searches', other: 'Other',
+  answer: 'Answers', plan: 'Planner', critic: 'Plan critic', replan: 'Re-planning', pc: 'PC control', apps: 'Connected apps', agent: 'Agents', fix: 'Fixes', review: 'Review', assistant: 'Voice chat', search: 'Web searches', other: 'Other',
 };
 const KIND_LABEL: Record<Forecast['kind'], string> = {
-  chat: 'Quick answer', pc: 'PC task', small: 'Small build (1 agent)', large: 'Full build', auto: 'Full build',
+  chat: 'Quick answer', pc: 'PC task', apps: 'Accounts task', small: 'Small build (1 agent)', large: 'Full build', auto: 'Full build',
 };
 
 function Calculator() {

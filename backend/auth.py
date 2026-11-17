@@ -94,6 +94,10 @@ def require_auth():
     """Flask before_request hook: authenticate and enforce role rules."""
     if request.method == 'OPTIONS' or not request.path.startswith('/api') or request.path in OPEN_PATHS:
         return None
+    if request.path.startswith('/api/integrations/callback/'):
+        return None          # the service sends the browser back here; the signed state identifies the user
+    if request.path.startswith(('/api/platform/', '/api/connect/')):
+        return None          # Adion Connect: handled by its own blueprints
     parts = request.path.split('/', 5)          # ['', 'api', 'preview', <token>, <run_id>, <file>]
     preview = request.path.startswith('/api/preview/')
     tok = (parts[3] if len(parts) > 3 else '') if preview else (
@@ -114,6 +118,8 @@ def require_auth():
     role, write = row.role, request.method != 'GET'
     if request.path.startswith('/api/users') and role != 'admin':
         return jsonify({'error': 'admin only'}), 403
+    if write and request.path in ('/api/auth/apikey', '/api/auth/searchkey', '/api/auth/claudekey', '/api/auth/brain') and role != 'admin':
+        return jsonify({'error': 'only the owner can set the API keys (they are shared by everyone)'}), 403
     if request.path.startswith('/api/jobs') and role != 'admin':
         return jsonify({'error': 'background shell jobs are admin only'}), 403
     if write and role == 'viewer' and request.path not in ('/api/auth/password', '/api/assistant/chat', '/api/voice/tts', '/api/voice/detect', '/api/voice/transcribe'):
@@ -181,13 +187,38 @@ def stored_search_key(username):
     return os.getenv('TAVILY_API_KEY', '').strip()
 
 
+def stored_claude_key(username):
+    """Decrypted Claude key: the user's own, else the first admin's (a shared team key), else ANTHROPIC_API_KEY from the server env."""
+    for row in [UserDocument.objects(username=username).first()] + list(UserDocument.objects(role='admin')):
+        if row and row.anthropic_enc:
+            k = decrypt_json(row.anthropic_enc).get('k', '')
+            if k:
+                return k
+    return os.getenv('ANTHROPIC_API_KEY', '').strip()
+
+
+BRAINS = ('deepseek', 'claude', 'mixed')
+
+
+def stored_brain():
+    """The owner's model setup: deepseek (all cheap), claude (all Claude) or mixed (Claude thinks and talks, DeepSeek writes the files)."""
+    for row in UserDocument.objects(role='admin'):
+        if row.brain in BRAINS:
+            return row.brain
+    return os.getenv('ADION_BRAIN', 'deepseek') if os.getenv('ADION_BRAIN', 'deepseek') in BRAINS else 'deepseek'
+
+
 def with_stored_key(keys, username):
-    """Fill in the DeepSeek key from the database when the caller did not supply one."""
+    """Fill in the model keys and the owner's model setup from the database when the caller did not supply them."""
     keys = dict(keys or {})
     if not keys.get('deepseek'):
         keys['deepseek'] = stored_key(username)
     if not keys.get('tavily'):
         keys['tavily'] = stored_search_key(username)
+    if not keys.get('anthropic'):
+        keys['anthropic'] = stored_claude_key(username)
+    if not keys.get('brain'):
+        keys['brain'] = stored_brain()
     return keys
 
 
@@ -235,6 +266,47 @@ def put_searchkey():
 def delete_searchkey():
     UserDocument.objects(username=current_user()['u']).update_one(set__tavily_enc='')
     return jsonify({'ok': True})
+
+
+@auth_bp.route('/auth/claudekey', methods=['GET'])
+def get_claudekey():
+    row = UserDocument.objects(username=current_user()['u']).first()
+    k = decrypt_json(row.anthropic_enc).get('k', '') if row and row.anthropic_enc else ''
+    shared = bool(not k and stored_claude_key(current_user()['u']))
+    return jsonify({'set': bool(k), 'hint': (k[:7] + '…' + k[-4:]) if len(k) > 12 else '', 'shared': shared})
+
+
+@auth_bp.route('/auth/claudekey', methods=['PUT'])
+def put_claudekey():
+    k = str((request.get_json(silent=True) or {}).get('key', '')).strip()
+    if len(k) < 20 or any(c.isspace() for c in k):
+        return jsonify({'error': 'that does not look like a Claude API key (starts with sk-ant-)'}), 400
+    UserDocument.objects(username=current_user()['u']).update_one(set__anthropic_enc=encrypt_json({'k': k}))
+    return jsonify({'ok': True, 'hint': k[:7] + '…' + k[-4:]})
+
+
+@auth_bp.route('/auth/claudekey', methods=['DELETE'])
+def delete_claudekey():
+    UserDocument.objects(username=current_user()['u']).update_one(set__anthropic_enc='')
+    if not stored_claude_key(current_user()['u']):
+        UserDocument.objects(role='admin').update(set__brain='deepseek')       # nothing left to run Claude with
+    return jsonify({'ok': True})
+
+
+@auth_bp.route('/auth/brain', methods=['GET'])
+def get_brain():
+    return jsonify({'brain': stored_brain(), 'claude': bool(stored_claude_key(current_user()['u'])), 'options': list(BRAINS)})
+
+
+@auth_bp.route('/auth/brain', methods=['PUT'])
+def put_brain():
+    b = str((request.get_json(silent=True) or {}).get('brain', '')).strip().lower()
+    if b not in BRAINS:
+        return jsonify({'error': 'brain must be deepseek, claude or mixed'}), 400
+    if b != 'deepseek' and not stored_claude_key(current_user()['u']):
+        return jsonify({'error': 'add the Claude API key first'}), 400
+    UserDocument.objects(role='admin').update(set__brain=b)
+    return jsonify({'ok': True, 'brain': b})
 
 
 @auth_bp.route('/users', methods=['GET'])

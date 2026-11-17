@@ -1,7 +1,10 @@
 'use client';
 
 import React from 'react';
-import { Settings, Mic } from 'lucide-react';
+import { Settings, Mic, Plug } from 'lucide-react';
+import ConnectHub, { Owner } from '@/components/portal/ConnectHub';
+import OwnerKeys from '@/components/OwnerKeys';
+import OwnerIntegrations from '@/components/OwnerIntegrations';
 import { AppProvider, useApp } from '@/context/AppContext';
 import LoginScreen from '@/components/LoginScreen';
 import GoalConsole from '@/components/GoalConsole';
@@ -24,6 +27,7 @@ const ROLE_STYLE: Record<string, string> = {
 function Shell() {
   const { authed, setSettingsOpen, user, snap } = useApp();
   const { isVoiceActive, isThinking, isSpeaking, setVoiceSettingsOpen } = useVoice();
+  const [view, setView] = React.useState<'assistant' | 'connect' | 'owner'>('assistant');
   if (authed === null) return <div className="min-h-screen bg-slate-950" />;
   if (!authed) return <LoginScreen />;
   const building = !!snap && ['planning', 'running'].includes(snap.run.status);
@@ -49,24 +53,37 @@ function Shell() {
                 {user.username} · {user.role}
               </span>
             )}
+            <div className="flex rounded-lg border border-slate-800 bg-slate-900/60 p-0.5 text-xs">
+              {([['assistant', 'Assistant'], ['connect', 'Connect'], ...(user?.role === 'admin' ? [['owner', 'Owner']] : [])] as [typeof view, string][]).map(([id, name]) => (
+                <button key={id} onClick={() => setView(id)} className={`flex items-center gap-1.5 rounded-md px-3 py-1 transition ${view === id ? 'bg-cyan-600 text-white' : 'text-slate-300 hover:text-white'}`}>
+                  {id === 'connect' && <Plug className="h-3.5 w-3.5" />}{name}</button>))}
+            </div>
             <button onClick={() => setVoiceSettingsOpen(true)}
               className="flex items-center gap-1.5 rounded-lg border border-slate-800 hover:border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 hover:text-white transition">
               <Mic className="h-3.5 w-3.5" /> Voice
             </button>
-            <button onClick={() => setSettingsOpen(true)}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-800 hover:border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 hover:text-white transition">
-              <Settings className="h-3.5 w-3.5" /> Models &amp; keys
-            </button>
+            {/* API keys are shared by everyone and set only by the owner (Owner tab). Others just get password + sign out. */}
+            {user?.role !== 'admin' && (
+              <button onClick={() => setSettingsOpen(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-800 hover:border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 hover:text-white transition">
+                <Settings className="h-3.5 w-3.5" /> Account
+              </button>)}
           </div>
         </div>
       </header>
-      <main className="flex-1 max-w-[1500px] w-full mx-auto px-4 sm:px-6 pt-5 pb-28 flex flex-col lg:flex-row gap-5 min-h-0">
-        <div className="flex-1 min-w-0 space-y-5">
-          <GoalConsole />
-          <AgentMap />
-        </div>
-        <SidePanel />
-      </main>
+      {view === 'owner' ? (
+        <main className="flex-1 max-w-[1100px] w-full mx-auto px-4 sm:px-6 pt-5 pb-28"><div className="space-y-5"><OwnerKeys /><OwnerIntegrations /><Owner /></div></main>
+      ) : view === 'connect' ? (
+        <main className="flex-1 max-w-[1500px] w-full mx-auto pb-28"><ConnectHub embedded /></main>
+      ) : (
+        <main className="flex-1 max-w-[1500px] w-full mx-auto px-4 sm:px-6 pt-5 pb-28 flex flex-col lg:flex-row gap-5 min-h-0">
+          <div className="flex-1 min-w-0 space-y-5">
+            <GoalConsole />
+            <AgentMap />
+          </div>
+          <SidePanel />
+        </main>
+      )}
       <TaskDrawer />
       <SettingsModal />
       <PcDock />

@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { MessageSquare, Terminal, CalendarClock, Brain, Trash2, RotateCw, Square, Plus, Users, Coins, Laptop } from 'lucide-react';
+import { MessageSquare, Terminal, CalendarClock, Brain, Trash2, RotateCw, Square, Plus, Users, Coins, Laptop, Plug } from 'lucide-react';
 import UsagePanel from '@/components/UsagePanel';
 import PcPanel from '@/components/PcPanel';
+import AppsPanel from '@/components/AppsPanel';
 import { useApp, type Panel } from '@/context/AppContext';
 import { api, fmtTokens, type Job, type MemoryItem, type Role, type Run, type Schedule, type User } from '@/lib/api';
 
@@ -13,6 +14,7 @@ const TABS: { id: Panel; label: string; icon: React.ReactNode; admin?: boolean }
   { id: 'schedules', label: 'Schedules', icon: <CalendarClock className="h-3.5 w-3.5" /> },
   { id: 'memory', label: 'Memory', icon: <Brain className="h-3.5 w-3.5" /> },
   { id: 'pc', label: 'PC', icon: <Laptop className="h-3.5 w-3.5" />, admin: true },
+  { id: 'apps', label: 'Apps', icon: <Plug className="h-3.5 w-3.5" /> },
   { id: 'usage', label: 'Usage', icon: <Coins className="h-3.5 w-3.5" /> },
   { id: 'users', label: 'Users', icon: <Users className="h-3.5 w-3.5" />, admin: true },
 ];
@@ -192,14 +194,23 @@ function MemoryPanel() {
   const [items, setItems] = useState<MemoryItem[]>([]);
   const [text, setText] = useState('');
   const [kind, setKind] = useState<'note' | 'preference'>('preference');
-  const load = useCallback(async () => { try { setItems(await api<MemoryItem[]>('/memory')); } catch { /* ignore */ } }, []);
+  const [learning, setLearning] = useState(true);
+  const load = useCallback(async () => {
+    try { setItems(await api<MemoryItem[]>('/memory')); setLearning((await api<{ on: boolean }>('/memory/learning')).on); } catch { /* ignore */ }
+  }, []);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- data loading: state is set from async results
     load();
   }, [load]);
+  const toggle = async () => { const on = !learning; setLearning(on); try { await api('/memory/learning', { method: 'PUT', json: { on } }); } catch { setLearning(!on); } };
   return (
     <div className="space-y-3">
-      <p className="text-[11px] text-slate-500 leading-relaxed">Preferences are always given to the planner; other notes are recalled when they match your goal. Finished builds are remembered automatically.</p>
+      <label className="flex items-start gap-2 rounded-lg border border-slate-800 bg-slate-900/40 p-2.5 cursor-pointer">
+        <input type="checkbox" className="mt-0.5" checked={learning} onChange={toggle} />
+        <span className="text-xs text-slate-300">Let Adion learn from my chats
+          <span className="block text-[11px] text-slate-500 leading-relaxed">It writes down lasting things you say (who you are, how you like answers, corrections) so it gets better for you. Only you see these notes, they never include passwords or keys, and you can delete any of them below.</span></span>
+      </label>
+      <p className="text-[11px] text-slate-500 leading-relaxed">Preferences and what Adion learned about you are always used; other notes are recalled when they match what you ask. Finished builds are remembered automatically.</p>
       <textarea className={inputCls} rows={2} placeholder="e.g. Always use dark theme and vanilla JS" value={text} onChange={e => setText(e.target.value)} />
       <div className="flex gap-2">
         <select className={inputCls} value={kind} onChange={e => setKind(e.target.value as 'note' | 'preference')}>
@@ -211,7 +222,7 @@ function MemoryPanel() {
       <ul className="space-y-1.5">
         {items.map(m => (
           <li key={m.id} className="rounded-lg border border-slate-800 px-2.5 py-2 flex justify-between gap-2">
-            <div className="min-w-0"><span className="text-[10px] uppercase text-slate-500">{m.kind}</span>
+            <div className="min-w-0"><span className="text-[10px] uppercase text-slate-500">{m.kind}{m.source === 'learned' && <span className="ml-1.5 rounded bg-violet-500/15 px-1 text-violet-300 normal-case">learned</span>}</span>
               <p className="text-xs break-words">{m.text}</p></div>
             <button className="text-slate-500 hover:text-rose-400 shrink-0" onClick={async () => { await api(`/memory/${m.id}`, { method: 'DELETE' }); load(); }}><Trash2 className="h-3.5 w-3.5" /></button>
           </li>
@@ -290,6 +301,7 @@ export default function SidePanel() {
         {panel === 'memory' && <MemoryPanel />}
         {panel === 'usage' && <UsagePanel />}
         {panel === 'pc' && <PcPanel />}
+        {panel === 'apps' && <AppsPanel />}
         {panel === 'users' && <UsersPanel />}
       </div>
     </aside>

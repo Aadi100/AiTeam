@@ -10,6 +10,8 @@ const RISK: Record<PcStep['risk'], string> = {
   change: 'text-amber-300 border-amber-500/40', danger: 'text-rose-300 border-rose-500/50',
 };
 const LIVE = ['planning', 'running'];
+/** Tasks about connected accounts (mail, calendar...) live under /integrations; PC tasks under /pc. */
+const base = (id: string) => (id.startsWith('ap_') ? '/integrations/tasks' : '/pc/tasks');
 type Choice = 'once' | 'always' | 'deny';
 
 function StepRow({ s }: { s: PcStep }) {
@@ -44,7 +46,7 @@ export default function PcTaskCard({ taskId, onClose }: { taskId: string; onClos
   const [err, setErr] = useState('');
   const [report, setReport] = useState('');
 
-  const load = useCallback(() => { api<PcTask>(`/pc/tasks/${taskId}`).then(setTask).catch(e => setErr(e instanceof Error ? e.message : 'Failed')); }, [taskId]);
+  const load = useCallback(() => { api<PcTask>(`${base(taskId)}/${taskId}`).then(setTask).catch(e => setErr(e instanceof Error ? e.message : 'Failed')); }, [taskId]);
   useEffect(() => {
     load();
     const id = setInterval(() => load(), 1000);
@@ -55,7 +57,7 @@ export default function PcTaskCard({ taskId, onClose }: { taskId: string; onClos
     if (!task) return;
     setBusy(what); setErr('');
     try {
-      const t = await api<PcTask>(`/pc/tasks/${task.id}/${what}`, { method: 'POST', json: what === 'approve' ? { folders: choice } : {} });
+      const t = await api<PcTask>(`${base(task.id)}/${task.id}/${what}`, { method: 'POST', json: what === 'approve' ? { folders: choice } : {} });
       setTask(t);
       if (what === 'undo' && t.undoReport) setReport(`Undone: ${t.undoReport.undone}${t.undoReport.failed.length ? `, could not undo ${t.undoReport.failed.length}` : ''}`);
       refreshPc();

@@ -64,7 +64,7 @@ def start_run():
             return jsonify({'error': 'that project folder is outside the allowed folders'}), 403
     run = engine.create_run(
         goal, target, with_stored_key(b.get('apiKeys'), current_user()['u']), b.get('plannerModel', ''), b.get('workerModel', ''),
-        b.get('maxTokens') or 0, source=b.get('source', 'manual'), memory=recall(goal),
+        b.get('maxTokens') or 0, source=b.get('source', 'manual'), memory=recall(goal, owner=current_user()['u']),
         owner=current_user()['u'], verify_run=bool(b.get('verify')), web_search=bool(b.get('webSearch')),
         review_plan=bool(b.get('reviewPlan')), continue_from=cont,
         deep_plan=b.get('deepPlan', True) is not False, thread_id=str(b.get('threadId') or '')[:40],

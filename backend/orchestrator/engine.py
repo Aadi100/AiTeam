@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from mongoengine import Q
 from models import RunDocument, AgentTaskDocument
-from . import llm, planner, sandbox, worker, verify, router, search, plans, files
+from . import llm, planner, sandbox, worker, verify, router, search, plans, files, learn
 
 MAX_WORKERS = int(os.getenv('MAX_WORKERS', '6'))
 MAX_ATTEMPTS = 2
@@ -295,7 +295,7 @@ def _execute(run_id, task_id):
     task = AgentTaskDocument.objects.get(task_id=task_id)
     with _lock:
         ctx = _run_keys.get(run_id, {'keys': {}})
-    spec = llm.resolve(run.worker_model, ctx['keys'])
+    spec = llm.resolve(run.worker_model, ctx['keys'], 'worker')
     AgentTaskDocument.objects(task_id=task_id).update_one(
         set__status='running', set__started_at=task.started_at or _now(), set__model=spec['label'],
         inc__attempts=1, set__error='')
@@ -321,7 +321,7 @@ def _execute(run_id, task_id):
         if task.kind != 'verify' and task.attempts < MAX_ATTEMPTS and not cancelled:
             worker.log(task, 'Retrying', 'warn')
             AgentTaskDocument.objects(task_id=task_id).update_one(set__status='queued', set__error=msg)
-        elif task.kind == 'module' and not cancelled and _try_revise(run_id, task, llm.resolve(run.planner_model, ctx['keys'])):
+        elif task.kind == 'module' and not cancelled and _try_revise(run_id, task, llm.resolve(run.planner_model, ctx['keys'], 'planner')):
             AgentTaskDocument.objects(task_id=task_id).update_one(set__error=msg)
         else:
             AgentTaskDocument.objects(task_id=task_id).update_one(
@@ -358,6 +358,23 @@ def _thread_history(run, limit=6):
     return [(p.goal, p.answer) for p in reversed(list(prev)) if p.answer]
 
 
+def _long_history(run, spec):
+    """The earlier conversation for the model: as many recent turns as fit the token budget (far more than before), plus a rolling summary of
+    anything older (kept up to date in the background by orchestrator/learn.py). -> (turns, summary)."""
+    turns = _thread_history(run, 120)
+    older, recent = learn.split_turns(turns, learn.history_budget(spec))
+    summary = learn.get_summary(run.owner, run.thread_id or run.run_id) if (older or len(turns) >= 120) else ''
+    return recent, summary
+
+
+def _after_chat(run, spec, keys, answer):
+    """The answer is saved: learn from it and refresh the thread summary (background; never blocks or breaks the chat)."""
+    try:
+        learn.after_chat(llm.resolve('', keys, 'worker'), run.owner, run.thread_id, run.run_id, run.goal, answer, lambda: _thread_history(run, 400))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _convo_text(history):
     return '\n'.join(f'User: {q[:300]}\nAdion: {a[:600]}' for q, a in history)
 
@@ -382,32 +399,39 @@ def _search_query(spec, goal, history, lctx):
         return f'{history[-1][0]} {goal}'[:200]
 
 
+def _web_context(run, spec, lctx, keys, history):
+    """Search the web first when the question is factual or the user asked for it. -> (sources block or '', sources list, note to append)."""
+    tkey = (keys or {}).get('tavily', '')
+    wants = run.web_search or search.should_search(run.goal)
+    if search.available(spec, tkey) and wants:
+        try:
+            query = _search_query(spec, run.goal, history, lctx)
+            found = search.search_for(spec, query, tkey, ctx=dict(lctx, purpose='search'))['results']
+            if found:
+                return (f'WEB SOURCES (searched for: {query}):\n{search.format_sources(found)}',
+                        search.source_links(found), '')
+            return '', [], '\n\n(I searched the web but found nothing useful, so this is only what I already know.)'
+        except search.SearchError as e:
+            return '', [], f'\n\n(Web search was unavailable: {e} This answer is from my built-in knowledge and may be out of date.)'
+    if wants and not search.available(spec, tkey):
+        return '', [], ('\n\n(Web search is switched on but no Tavily key is saved. The owner can add one on the Owner tab.)' if run.web_search else
+                       '\n\n(I can only answer from what I already know. The owner can add a free Tavily key on the Owner tab and I will look this up on the web.)')
+    return '', [], ''
+
+
 def _answer_direct(run, spec, lctx, keys, att='', history=None):
     """A question or a follow-up in a chat: one short call, no planner, no agents. Remembers the conversation, and looks
     things up on the web (Tavily) whenever the question is factual or the user asks for it."""
     history = history or []
-    system, sources, note, parts = ANSWER_SYSTEM, [], '', []
+    system, parts = ANSWER_SYSTEM, []
     if history:
         parts.append('CONVERSATION SO FAR:\n' + _convo_text(history))
     if att:
         parts.append(att)
-    tkey = (keys or {}).get('tavily', '')
-    wants = run.web_search or search.should_search(run.goal)
-    if tkey and wants:
-        try:
-            query = _search_query(spec, run.goal, history, lctx)
-            found = search.search(query, tkey, ctx=dict(lctx, purpose='search'))['results']
-            if found:
-                system = ANSWER_SYSTEM_WEB
-                parts.append(f'WEB SOURCES (searched for: {query}):\n{search.format_sources(found)}')
-                sources = [{'title': r['title'], 'url': r['url']} for r in found]
-            else:
-                note = '\n\n(I searched the web but found nothing useful, so this is only what I already know.)'
-        except search.SearchError as e:
-            note = f'\n\n(Web search was unavailable: {e} This answer is from my built-in knowledge and may be out of date.)'
-    elif wants and not tkey:
-        note = ('\n\n(Web search is switched on but no Tavily key is saved. Add one in Models & keys.)' if run.web_search else
-                '\n\n(I can only answer from what I already know. Add a free Tavily key in Models & keys and I will look this up on the web.)')
+    web, sources, note = _web_context(run, spec, lctx, keys, history)
+    if web:
+        system = ANSWER_SYSTEM_WEB
+        parts.append(web)
     if att:
         system += ATT_NOTE
     prompt = '\n\n'.join(parts + [f'QUESTION: {run.goal}'])
@@ -418,6 +442,44 @@ def _answer_direct(run, spec, lctx, keys, att='', history=None):
         raise llm.LLMError('the model returned an empty answer')
     _end_run(run.run_id, inc__tokens_in=ti, inc__tokens_out=to, set__answer=text.strip() + note, set__sources=sources,
              set__project_name=run.goal[:60], set__status='completed')
+    _after_chat(run, spec, keys, text.strip())
+
+
+def _answer_agent(run, spec, lctx, keys, att='', history=None):
+    """The general agent (orchestrator/agent.py) answers a chat message: it can search, read pages, remember, show Connect buttons, start PC or
+    account tasks and hand a build over. Returns 'build' when the message turned out to be a build request, otherwise finishes the run."""
+    from . import agent
+    run_id = run.run_id
+    history, summary = _long_history(run, spec) if run.thread_id else (history or [], '')
+    web, sources, note = _web_context(run, spec, lctx, keys, history)
+    prog = lambda t: RunDocument.objects(run_id=run_id).update_one(set__answer=t)  # noqa: E731
+    last = [0.0]
+
+    def on_text(text):      # the answer grows in the chat word by word; a cancel stops the stream
+        if time.time() - last[0] > 0.25:
+            last[0] = time.time()
+            prog(text)
+            if RunDocument.objects.get(run_id=run_id).cancel_requested:
+                raise llm.LLMError('cancelled')
+    try:
+        res = agent.run(run, spec, lctx, keys, history=history, att=att, web_parts=[web] if web else [], progress=prog, on_text=on_text, summary=summary)
+    except llm.LLMError as e:
+        if str(e) == 'cancelled':
+            return _finish(run_id, 'cancelled', 'Cancelled')
+        raise
+    if RunDocument.objects.get(run_id=run_id).cancel_requested:
+        return _finish(run_id, 'cancelled', 'Cancelled')
+    if res['build']:
+        run.update(set__goal=res['build'], set__kind='auto', inc__tokens_in=res['tokens_in'], inc__tokens_out=res['tokens_out'])
+        return 'build'
+    seen = {x['url'] for x in sources}
+    srcs = sources + [x for x in res['sources'] if x['url'] not in seen]
+    fields = dict(inc__tokens_in=res['tokens_in'], inc__tokens_out=res['tokens_out'], set__answer=res['answer'] + note, set__sources=srcs,
+                  set__cards=res['cards'], set__project_name=run.goal[:60], set__status='completed')
+    if res['task_id']:
+        fields['set__pc_task_id'] = res['task_id']
+    _end_run(run_id, **fields)
+    _after_chat(run, spec, keys, res['answer'])
 
 
 def _stream_answer(run_id, spec, system, prompt, lctx):
@@ -458,19 +520,33 @@ def _coordinate(run_id, feedback=''):
             kind = router.classify(run.goal)
             if (uploads or _thread_history(run)) and kind == 'auto':
                 kind = 'chat'   # a file, or an ongoing chat, makes a vague message a question/follow-up
+            if kind == 'auto' and run.mode != 'edit' and not router._noun.search(run.goal) and os.getenv('ADION_AGENT', '1') != '0':
+                kind = 'chat'   # the agent is the front door for everything that is not clearly about software: it answers, searches, connects accounts, or starts a build itself
             if run.mode == 'edit' and kind != 'chat':
                 kind = 'edit'
             fc = router.forecast(run.goal, kind, verify=run.verify, web_search=run.web_search)
             run.update(set__kind=kind, set__estimate_tokens=fc['tokens'], set__estimate_cost=fc['cost'])
         # ── 1. plan ──
-        pspec = llm.resolve(run.planner_model, ctx['keys'])
+        pspec = llm.resolve(run.planner_model, ctx['keys'], 'planner')
         run.update(set__planner_model=pspec['label'])
         clar = '\n'.join(f"Q: {q['q']}\nA: {q['answer']}" for q in run.questions if q.get('answer') and not q.get('taskId'))
         if run.source == 'schedule':
             clar = (clar + '\n' + UNATTENDED).strip()
         try:
             if kind == 'chat':
-                return _answer_direct(run, pspec, lctx, ctx['keys'], att, _thread_history(run))
+                if os.getenv('ADION_AGENT', '1') != '0':
+                    out = _answer_agent(run, pspec, lctx, ctx['keys'], att, _thread_history(run))
+                    if out != 'build':
+                        return out
+                    kind = 'auto'      # the agent decided this is a build: continue with the normal build pipeline
+                    run.reload()
+                else:
+                    return _answer_direct(run, pspec, lctx, ctx['keys'], att, _thread_history(run))
+            if kind == 'apps':   # something to do in the user's connected accounts (mail, calendar...): it asks before sending or changing anything
+                from integrations import engine as apps_engine
+                tid = apps_engine.start_task(run.goal, run.owner, ctx['keys'], run_id=run_id)
+                return _end_run(run_id, set__pc_task_id=tid, set__answer='On it. Watch the card below: I will ask before I send or change anything.',
+                                set__project_name=run.goal[:60], set__status='completed')
             if kind == 'pc':   # something to do on the user's PC: hand over to the PC engine (it asks before changing anything)
                 from .pc import engine as pc_engine
                 tid = pc_engine.start_task(run.goal, run.owner, ctx['keys'], run_id=run_id)
@@ -586,7 +662,7 @@ def _schedule_then_finish(run_id):
                 pass
             try:
                 from routes.memory import remember
-                remember(f'{"Changed" if run.mode == "edit" else "Built"} "{run.project_name}" in {run.target_path}: {run.summary}', 'build')
+                remember(f'{"Changed" if run.mode == "edit" else "Built"} "{run.project_name}" in {run.target_path}: {run.summary}', 'build', owner=run.owner)
             except Exception:  # noqa: BLE001 - memory is best-effort
                 pass
         else:

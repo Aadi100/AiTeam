@@ -121,3 +121,54 @@ touch your real data. The browser check test opens a real headless Edge/Chrome.
 - The browser check and **Run the result** execute generated code on this computer. Both are opt-in and run with your
   secrets removed from the environment, but they are not a container.
 - API keys are encrypted in the database with a secret kept in `backend/.auth.json`. Back that file up with the database.
+
+## Adion Connect (connect other people's apps)
+
+Clients sign up at `/portal`, create a project → app, and get a public key (`pk_…`, safe in the app) and a secret key (`sk_…`, shown once, for their server).
+Each app's assistant knows only that app (description, rules, uploaded knowledge) and acts only for that app's signed-in users. PC control, builds and personal memory are off.
+
+- **Modes:** knowledge only · API connection (import OpenAPI/Swagger/Postman, or add by hand; Adion calls the client's server with the user's own token or a saved header key) · in-app actions (the app's own code runs them via the SDK).
+- **Access levels:** limited (read only) · standard (changes, always confirmed) · complete (risky too, always confirmed). Per action: never-by-AI, hidden fields; secrets are auto-redacted.
+- **Billing:** every model call is tagged client/app/user; price = DeepSeek cost × owner markup; caps per app/client; owner console in the portal (shown to the Adion admin login).
+- **Embedding:** `<script src=".../api/connect/widget.js">` + `Adion.init({...})`, or the REST API (`/api/connect/v1/...`). The portal's Guide tab generates the exact code for web, React/Next, React Native and plain REST.
+- **Env:** `PUBLIC_URL` (the server's public address, used in guides), `CONNECT_ALLOW_PRIVATE=1` (dev/tests only: lets API connections reach localhost).
+- **Hosting:** use an always-on server (Render/Railway/VPS) + MongoDB Atlas for the backend; Vercel is fine for the frontend only.
+- **Tests:** `venv\Scripts\python.exe tests\run_all.py` (147 checks for Connect).
+
+## Connected apps (Gmail, Calendar, GitHub, Slack, Notion, ...)
+
+Every user (and the owner) can connect their own accounts in the **Apps** tab with one Connect button, then just ask Adion in chat or by voice
+("any unread mail from Sara?", "put lunch with Omar on Friday at 1 and email him", "open an issue on my repo").
+
+- **Services:** Google (Gmail, Calendar, Drive, Docs, Sheets, Tasks), Microsoft (Outlook, Calendar, OneDrive, To Do), GitHub, Slack, Notion, Todoist, Asana, Linear, Dropbox, Spotify, Zoom, LinkedIn, X, Facebook/Instagram. Add one by adding an entry in `backend/integrations/providers.py`.
+- **Set-up (owner, once per service):** Owner tab > Connected apps. Create the OAuth app on the service's developer page, register the Redirect URI shown there, paste the client ID and secret. Users never see or need these.
+- **Safety:** reading runs by itself; sending, creating, posting, changing or deleting always shows the exact action first and waits for Approve. Mail/events/messages are treated as data, never as instructions. Tokens are encrypted per user; a user can only use their own accounts. Max 20 changes per hour.
+- **Env:** `PUBLIC_URL` = the backend's address as the browser reaches it (default: the request address, e.g. http://localhost:5000); `FRONTEND_URL` = where to send the browser back after connecting (default http://localhost:3001).
+- **Tests:** `backend/tests/test_integrations.py` (65 checks, offline).
+
+## The Adion agent (chat that can do things)
+
+Typed and spoken messages that are not clearly "build me an app" go to one general agent (`backend/orchestrator/agent.py`) instead of fixed lanes. It has a toolbox and loops until the job is done:
+web search, reading web pages, memory (remember/recall), `connect_account` (shows a Connect button in the chat, or tells the owner exactly what to set up), `accounts_task` (mail, calendar, GitHub, Slack... with approval cards),
+`pc_task` (your PC, with approvals) and `start_build` (hands over to the build team). It gets the whole conversation (last 16 turns), streams its answer, and answers are shown as Markdown with copyable code blocks.
+Web pages and tool results are treated as data, never instructions. `ADION_AGENT=0` switches back to the classic one-call answer path. Tests: `backend/tests/test_agent.py`.
+
+## Claude as a second brain (optional)
+
+DeepSeek is the default and the cheapest. The owner can add a Claude API key on the **Owner** tab (get one at console.anthropic.com, add credit under Billing) and pick:
+
+- **DeepSeek only** - everything on DeepSeek.
+- **Mixed** - Claude plans, chats and works in your accounts; DeepSeek writes the code files (best value).
+- **Claude only** - everything on Claude.
+
+The choice applies to everyone; members never see the keys. Removing the Claude key puts everything back on DeepSeek. Claude uses the official `anthropic` SDK (`backend/orchestrator/claude_llm.py`); models: `claude-sonnet-5-5` (default), `claude-haiku-5-5`, `claude-opus-5-5`. Env: `ANTHROPIC_API_KEY`, `ADION_BRAIN`, `ANTHROPIC_FALLBACK=0` (turn off the safety fallback), `ANTHROPIC_PRICES` (override prices). Tavily is for DeepSeek only: when Claude answers it uses its own built-in web search (about $0.01 per search), so no Tavily key is needed.
+
+## Tool servers (MCP, e.g. Zapier)
+
+In **Assistant -> Apps -> Tool servers** each person can add their own MCP link (for example from mcp.zapier.com). Adion can then use those tools in that person's apps only. Links are stored encrypted, only public https servers are called, lookups run at once and anything that sends or changes something waits for Approve. Tests: `tests/test_mcp.py`.
+
+## Learning and long conversations
+
+- **Adion learns from chats.** After an answer it can write down lasting things you said (who you are, how you like answers, corrections) into **your own** memory, marked "learned". Only you see them; secrets (keys, passwords, card numbers) are never saved; you can delete any note or switch learning off in Assistant -> Memory. `ADION_LEARN=0` switches it off for everyone.
+- **Memory is private per person** (it used to be shared; older notes stay with the owner).
+- **Longer context.** Recent turns are sent in full up to a token budget (28k tokens for DeepSeek, 150k for Claude; `ADION_HISTORY_TOKENS` overrides), and older turns become a rolling summary refreshed in the background. Code: `backend/orchestrator/learn.py`, tests: `tests/test_learn.py`.

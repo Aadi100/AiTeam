@@ -58,8 +58,23 @@ def is_pc_request(goal):
     return bool(_pc_place.search(g) and _pc_verb.search(g) and not (_build.search(g) and _noun.search(g)))
 
 
+_apps_noun = re.compile(r"\b(?:e-?mails?|gmail|outlook|zapier|mcp|tool servers?|inbox|calendar|meetings?|appointments?|github|issues?|pull requests?|slack|notion|todoist|asana|linear|dropbox|spotify|zoom|linkedin|tweets?|twitter|facebook|instagram|google (?:drive|docs|sheets|tasks)|onedrive|my (?:tasks|to-?dos?|playlists?|repos?|schedule))\b", re.I)
+_apps_verb = re.compile(r"\b(?:read|check|send|reply|write|draft|search|find|show|list|what|whats|any|new|unread|create|add|book|schedule|post|summari[sz]e|tell|do i have|remind|forward|delete|cancel|move|play|pause)\b", re.I)
+_apps_mine = re.compile(r"\b(?:my|me|mine|inbox|unread|i have|i got|for me|to me)\b|\S+@\S+\.\S+|^(?:hey |ok |please |adion[, ]*)*(?:send|email|reply|forward)\b", re.I)
+
+
+def is_apps_request(goal):
+    """Plain-code check: is this about the user's own accounts (mail, calendar, GitHub, Slack, Notion...)?"""
+    g = (goal or '').strip()
+    if not _apps_noun.search(g) or not _apps_verb.search(g) or not _apps_mine.search(g):
+        return False
+    return not (_build.search(g) and _noun.search(g))
+
+
 def classify(goal):
     g = (goal or '').strip()
+    if is_apps_request(g):
+        return 'apps'
     if is_pc_request(g):
         return 'pc'
     words = len(g.split())
@@ -105,6 +120,9 @@ def forecast(goal, kind=None, module_descs=None, contract_text=None, verify=Fals
         web = should_search(goal, web_search)
         parts.append(('Answer + web sources' if web else 'Answer', _row(120 + g + (480 if web else 0), 0.0, 350)))
         n = 0
+    elif kind == 'apps':
+        n = 0
+        parts.append(('Connected accounts', _row(2 * (SYS_PLANNER + g), 0.0, 500)))
     elif kind == 'pc':
         n = 0
         parts.append(('PC control', _row(2 * (SYS_PLANNER + g), 0.0, 400)))

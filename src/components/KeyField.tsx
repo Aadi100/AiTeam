@@ -6,8 +6,8 @@ import { api } from '@/lib/api';
 interface Info { set: boolean; hint: string; shared: boolean }
 
 /** One API key, stored encrypted in the server database. The key is never kept in the browser. */
-export default function KeyField({ title, endpoint, placeholder, minLen, help, missing, active }: {
-  title: string; endpoint: string; placeholder: string; minLen: number; help: React.ReactNode; missing: string; active: boolean;
+export default function KeyField({ title, endpoint, placeholder, minLen, help, missing, active, onChange }: {
+  title: string; endpoint: string; placeholder: string; minLen: number; help: React.ReactNode; missing: string; active: boolean; onChange?: () => void;
 }) {
   const [info, setInfo] = useState<Info | null>(null);
   const [val, setVal] = useState('');
@@ -15,11 +15,11 @@ export default function KeyField({ title, endpoint, placeholder, minLen, help, m
   const load = useCallback(() => { api<Info>(endpoint).then(setInfo).catch(() => setInfo(null)); }, [endpoint]);
   useEffect(() => { if (active) load(); }, [active, load]);
   const save = async () => {
-    try { await api(endpoint, { method: 'PUT', json: { key: val } }); setVal(''); setMsg('Saved, encrypted in the database'); load(); }
+    try { await api(endpoint, { method: 'PUT', json: { key: val } }); setVal(''); setMsg('Saved, encrypted in the database'); load(); onChange?.(); }
     catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
   };
   const remove = async () => {
-    try { await api(endpoint, { method: 'DELETE' }); setMsg('Removed'); load(); }
+    try { await api(endpoint, { method: 'DELETE' }); setMsg('Removed'); load(); onChange?.(); }
     catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
   };
   return (

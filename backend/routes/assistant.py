@@ -28,7 +28,7 @@ You can see the CONTEXT below (current build, agents, files, memory, date/time).
 LANGUAGE: always reply in the SAME language the user just spoke or wrote (Hindi, Urdu, Arabic, Spanish, French... anything), unless they ask you to switch.
 Put that language's two-letter ISO 639-1 code in "lang" (for example en, hi, ur, ar, es).
 
-Return ONLY JSON: {"reply": "what you say", "lang": "en", "action": {"type": "none|build|cancel|read_file|remember|pc", "goal": "", "path": "", "text": "", "request": ""}}
+Return ONLY JSON: {"reply": "what you say", "lang": "en", "action": {"type": "none|build|cancel|read_file|remember|pc|apps|agent", "goal": "", "path": "", "text": "", "request": ""}}
 
 Action rules:
 - build: the user wants software created or changed. goal = one complete self-contained description using everything they said. In reply, confirm briefly what you are starting.
@@ -36,13 +36,15 @@ Action rules:
 - read_file: the user wants something read out (README, a file, a summary). path = exact path from FILES. In reply, say you are reading it.
 - remember: the user wants you to remember a preference or fact. text = the fact, phrased as a standalone sentence.
 - pc: the user wants something done ON THEIR COMPUTER: open an app or website, find/read/move/copy/rename/delete files or folders, volume, lock, system status. request = the full request in plain words. In reply, say you are on it (you will ask before changing anything).
+- apps: the user wants something done in THEIR CONNECTED ACCOUNTS: read, search or send email, calendar and meetings, GitHub, Slack, Notion, tasks, Drive, social posts. request = the full request in plain words. In reply, say you are on it (you will ask before sending or changing anything).
+- agent: anything that needs looking something up or doing something you are not sure you can do just by talking: web search, reading a page, connecting an account (Google, Slack...), research, multi-step jobs. request = the full request in plain words. In reply, say you are on it. NEVER say you cannot do something: use agent.
 - none: normal conversation, status questions, jokes, advice, anything else."""
 
 
 def _context(run_id, user, message):
     now = datetime.now().strftime('%A, %d %B %Y, %H:%M')
     parts = [f'User name: {user}', f'Now: {now}']
-    mem = recall(message)
+    mem = recall(message, owner=user)
     if mem:
         parts.append('MEMORY:\n' + mem)
     run = RunDocument.objects(run_id=run_id).first() if run_id else None
@@ -85,7 +87,7 @@ def chat():
         except search.SearchError:
             pass
     prompt = f'CONTEXT:\n{ctx}{web}\n\nCONVERSATION SO FAR:\n{convo or "(new conversation)"}\n\nUser: {message}'
-    spec = llm.resolve(b.get('model') or os.getenv('ASSISTANT_MODEL') or os.getenv('WORKER_MODEL', ''), keys)
+    spec = llm.resolve(b.get('model') or os.getenv('ASSISTANT_MODEL') or os.getenv('WORKER_MODEL', ''), keys, 'assistant')
     try:
         text, _, _ = llm.chat(spec, SYSTEM, prompt, json_mode=True, max_output=700,
                               ctx={'owner': current_user()['u'], 'run_id': '', 'purpose': 'assistant'})
@@ -96,18 +98,23 @@ def chat():
         # model ignored the format: just speak what it said
         return jsonify({'reply': (text or 'Sorry, I lost my train of thought.').strip()[:600], 'action': {'type': 'none'}})
     action = data.get('action') if isinstance(data.get('action'), dict) else {'type': 'none'}
-    atype = action.get('type') if action.get('type') in ('none', 'build', 'cancel', 'read_file', 'remember', 'pc') else 'none'
+    atype = action.get('type') if action.get('type') in ('none', 'build', 'cancel', 'read_file', 'remember', 'pc', 'apps', 'agent') else 'none'
     lang = str(data.get('lang') or '').strip().lower().split('-')[0]
     out = {'reply': data['reply'].strip()[:600], 'action': {'type': atype}, 'lang': lang if 2 <= len(lang) <= 3 and lang.isalpha() else ''}
 
     if atype == 'pc':
         from orchestrator.pc import engine as pc_engine
         out['action']['taskId'] = pc_engine.start_task((action.get('request') or message).strip(), current_user()['u'], keys)
+    elif atype == 'apps':
+        from integrations import engine as apps_engine
+        out['action']['taskId'] = apps_engine.start_task((action.get('request') or message).strip(), current_user()['u'], keys)
+    elif atype == 'agent':
+        out['action']['goal'] = (action.get('request') or message).strip()
     elif atype == 'build':
         goal = (action.get('goal') or message).strip()
         out['action']['goal'] = goal
     elif atype == 'remember' and (action.get('text') or '').strip():
-        remember(action['text'].strip(), 'preference')
+        remember(action['text'].strip(), 'preference', owner=current_user()['u'])
     elif atype == 'read_file':
         path = (action.get('path') or '').strip()
         if run and path:

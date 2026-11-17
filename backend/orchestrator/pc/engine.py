@@ -291,7 +291,7 @@ def _execute(task, steps, only_ids=None, auto=False):
 
 def _loop(task_id, keys):
     task = PcTaskDocument.objects.get(task_id=task_id)
-    spec = llm.resolve(os.getenv('WORKER_MODEL', 'deepseek-chat'), keys)
+    spec = llm.resolve(os.getenv('WORKER_MODEL', 'deepseek-chat'), keys, 'pc')
     while task.rounds < MAX_ROUNDS:
         task.reload()
         if policy.get_settings(task.owner).paused:

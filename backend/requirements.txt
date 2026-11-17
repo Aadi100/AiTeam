@@ -17,3 +17,5 @@ langdetect>=1.0.9
 faster-whisper>=1.0
 av>=12
 numpy
+pyyaml
+anthropic>=2.9
